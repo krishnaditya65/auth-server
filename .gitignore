@@ -1,0 +1,29 @@
+# binaries
+bin/
+dist/
+*.exe
+*.out
+*.test
+
+# env
+.env
+.env.local
+
+# logs
+*.log
+logs/
+
+# coverage
+coverage.out
+coverage.html
+
+# IDE
+.idea/
+.vscode/
+
+# macOS
+.DS_Store
+
+# temp
+tmp/
+.cache/

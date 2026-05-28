@@ -1,0 +1,57 @@
+name: auth-server
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: auth-server-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: authserver
+      POSTGRES_USER: authadmin
+      POSTGRES_PASSWORD: authpassword
+    ports:
+      - "5433:5432"
+    volumes:
+      - auth_server_postgres_data:/var/lib/postgresql/data
+    networks:
+      - auth-server-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authadmin -d authserver"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: auth-server-redis
+    restart: unless-stopped
+    ports:
+      - "6380:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - auth_server_redis_data:/data
+    networks:
+      - auth-server-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  nats:
+    image: nats:2.10
+    container_name: auth-server-nats
+    restart: unless-stopped
+    ports:
+      - "4223:4222"
+      - "8223:8222"
+    networks:
+      - auth-server-network
+
+volumes:
+  auth_server_postgres_data:
+  auth_server_redis_data:
+
+networks:
+  auth-server-network:
+    driver: bridge

@@ -2,12 +2,21 @@ package main
 
 import (
 	"log"
+	"net/http"
 
 	authapp "github.com/krishnaditya65/auth-server/internal/auth/app"
 	authpostgres "github.com/krishnaditya65/auth-server/internal/auth/infra/postgres"
 	authhttp "github.com/krishnaditya65/auth-server/internal/auth/transport/http"
+	authorizationapp "github.com/krishnaditya65/auth-server/internal/authorization/app"
+
+	authorizationpostgres "github.com/krishnaditya65/auth-server/internal/authorization/infra/postgres"
 
 	identitypostgres "github.com/krishnaditya65/auth-server/internal/identity/infra/postgres"
+	tenantapp "github.com/krishnaditya65/auth-server/internal/tenant/app"
+	tenantpostgres "github.com/krishnaditya65/auth-server/internal/tenant/infra/postgres"
+
+	postgresuser "github.com/krishnaditya65/auth-server/internal/identity/infra/postgresuser"
+	sessionpostgres "github.com/krishnaditya65/auth-server/internal/session/infra/postgres"
 
 	"github.com/krishnaditya65/auth-server/internal/platform/config"
 	"github.com/krishnaditya65/auth-server/internal/platform/httpserver"
@@ -48,25 +57,84 @@ func main() {
 	// repositories
 	identityRepo := identitypostgres.NewRepository(db)
 	credentialRepo := authpostgres.NewRepository(db)
+	tenantRepo := tenantpostgres.NewRepository(db)
+
+	userRepo := postgresuser.NewRepository(db)
+	sessionRepo := sessionpostgres.NewRepository(
+		db,
+	)
 
 	// usecases
+	slugService := tenantapp.NewSlugService(
+		tenantRepo,
+	)
+
+	roleRepo := authorizationpostgres.NewRoleRepository(db)
+
+	userRoleRepo := authorizationpostgres.NewUserRoleRepository(db)
+
+	bootstrapService := authorizationapp.NewBootstrapService(
+		roleRepo,
+	)
+
 	registerUseCase := authapp.NewRegisterUseCase(
 		txManager,
 		identityRepo,
 		credentialRepo,
+		tenantRepo,
+		userRepo,
+		slugService,
+		userRoleRepo,
+		bootstrapService,
+	)
+
+	loginUseCase := authapp.NewLoginUseCase(
+		identityRepo,
+		credentialRepo,
+		userRepo,
+		userRoleRepo,
+		sessionRepo,
+	)
+
+	meUseCase := authapp.NewMeUseCase(
+		sessionRepo,
+		identityRepo,
+		userRepo,
+		userRoleRepo,
 	)
 
 	// handlers
 	authHandler := authhttp.NewHandler(
 		registerUseCase,
+		loginUseCase,
+		meUseCase,
 	)
-
 	server := httpserver.New(cfg.HTTPPort)
+
+	server.Handle(
+		"GET",
+		"/health",
+		func(w http.ResponseWriter, r *http.Request) {
+			w.Write([]byte("ok"))
+		},
+	)
 
 	server.Handle(
 		"POST",
 		"/register",
 		authHandler.Register,
+	)
+
+	server.Handle(
+		"POST",
+		"/login",
+		authHandler.Login,
+	)
+
+	server.Handle(
+		"GET",
+		"/me",
+		authHandler.Me,
 	)
 
 	log.Printf("starting auth server on port %s", cfg.HTTPPort)

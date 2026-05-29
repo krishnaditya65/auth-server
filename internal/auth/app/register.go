@@ -9,7 +9,15 @@ import (
 
 	"github.com/krishnaditya65/auth-server/internal/shared/id"
 	"github.com/krishnaditya65/auth-server/internal/shared/password"
+	"github.com/krishnaditya65/auth-server/internal/shared/slug"
 	"github.com/krishnaditya65/auth-server/internal/shared/tx"
+
+	authorizationapp "github.com/krishnaditya65/auth-server/internal/authorization/app"
+
+	tenantapp "github.com/krishnaditya65/auth-server/internal/tenant/app"
+	tenantdomain "github.com/krishnaditya65/auth-server/internal/tenant/domain"
+
+	authorizationdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
 )
 
 type RegisterInput struct {
@@ -18,23 +26,46 @@ type RegisterInput struct {
 }
 
 type RegisterUseCase struct {
-	txManager      tx.Manager
+	txManager tx.Manager
+
 	identityRepo   identitydomain.Repository
 	credentialRepo authdomain.Repository
+
+	tenantRepo tenantdomain.Repository
+	userRepo   identitydomain.UserRepository
+
+	slugService *tenantapp.SlugService
+
+	userRoleRepo     authorizationdomain.UserRoleRepository
+	bootstrapService *authorizationapp.BootstrapService
 }
 
 func NewRegisterUseCase(
 	txManager tx.Manager,
 	identityRepo identitydomain.Repository,
 	credentialRepo authdomain.Repository,
+	tenantRepo tenantdomain.Repository,
+	userRepo identitydomain.UserRepository,
+	slugService *tenantapp.SlugService,
+	userRoleRepo authorizationdomain.UserRoleRepository,
+	bootstrapService *authorizationapp.BootstrapService,
 ) *RegisterUseCase {
+
 	return &RegisterUseCase{
-		txManager:      txManager,
+		txManager: txManager,
+
 		identityRepo:   identityRepo,
 		credentialRepo: credentialRepo,
+
+		tenantRepo: tenantRepo,
+		userRepo:   userRepo,
+
+		slugService: slugService,
+
+		userRoleRepo:     userRoleRepo,
+		bootstrapService: bootstrapService,
 	}
 }
-
 func (u *RegisterUseCase) Execute(
 	ctx context.Context,
 	input RegisterInput,
@@ -71,7 +102,85 @@ func (u *RegisterUseCase) Execute(
 				UpdatedAt:      now,
 			}
 
-			return u.credentialRepo.Create(txCtx, credential)
+			err = u.credentialRepo.Create(
+				txCtx,
+				credential,
+			)
+			if err != nil {
+				return err
+			}
+
+			baseSlug := slug.FromEmail(
+				input.Email,
+			)
+
+			uniqueSlug, err := u.slugService.GenerateUniqueSlug(
+				txCtx,
+				baseSlug,
+			)
+
+			if err != nil {
+				return err
+			}
+
+			tenant := &tenantdomain.Tenant{
+				ID:          id.New(),
+				Slug:        uniqueSlug,
+				DisplayName: input.Email,
+				Status:      "active",
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+
+			err = u.tenantRepo.Create(
+				txCtx,
+				tenant,
+			)
+			if err != nil {
+				return err
+			}
+
+			user := &identitydomain.User{
+				ID:          id.New(),
+				TenantID:    tenant.ID,
+				IdentityID:  identity.ID,
+				Username:    input.Email,
+				DisplayName: input.Email,
+				Status:      "active",
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}
+
+			err = u.userRepo.Create(
+				txCtx,
+				user,
+			)
+			if err != nil {
+				return err
+			}
+			role, err := u.bootstrapService.CreateTenantOwnerRole(
+				txCtx,
+				tenant.ID,
+			)
+
+			if err != nil {
+				return err
+			}
+
+			err = u.userRoleRepo.AssignRole(
+				txCtx,
+				&authorizationdomain.UserRole{
+					UserID:    user.ID,
+					RoleID:    role.ID,
+					CreatedAt: now,
+				},
+			)
+
+			if err != nil {
+				return err
+			}
+
+			return nil
 		},
 	)
 }

@@ -10,7 +10,7 @@ type Session struct {
 	RefreshTokenHash string
 	ParentSessionID  *string
 	IPAddress        *string
-	UserAgent        *string
+	UserAgent        string
 	ExpiresAt        time.Time
 	RevokedAt        *time.Time
 	CreatedAt        time.Time

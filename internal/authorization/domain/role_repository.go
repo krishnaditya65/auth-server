@@ -2,19 +2,20 @@ package domain
 
 import "context"
 
-type Repository interface {
+type RoleRepository interface {
 	Create(
 		ctx context.Context,
-		session *Session,
+		role *Role,
 	) error
 
 	GetByID(
 		ctx context.Context,
 		id string,
-	) (*Session, error)
+	) (*Role, error)
 
-	GetByRefreshTokenHash(
+	GetByTenantAndName(
 		ctx context.Context,
-		hash string,
-	) (*Session, error)
+		tenantID string,
+		name string,
+	) (*Role, error)
 }

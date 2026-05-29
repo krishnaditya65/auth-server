@@ -25,3 +25,11 @@ func (p *Principal) HasPermission(
 
 	return false
 }
+
+func (p *Principal) Require(
+	permission string,
+) bool {
+	return p.HasPermission(
+		permission,
+	)
+}

@@ -63,6 +63,15 @@ func main() {
 	sessionRepo := sessionpostgres.NewRepository(
 		db,
 	)
+	permissionRepo :=
+		authorizationpostgres.NewPermissionRepository(
+			db,
+		)
+
+	rolePermissionRepo :=
+		authorizationpostgres.NewRolePermissionRepository(
+			db,
+		)
 
 	// usecases
 	slugService := tenantapp.NewSlugService(
@@ -76,6 +85,12 @@ func main() {
 	bootstrapService := authorizationapp.NewBootstrapService(
 		roleRepo,
 	)
+	//services
+	permissionBootstrapService :=
+		authorizationapp.NewPermissionBootstrapService(
+			permissionRepo,
+			rolePermissionRepo,
+		)
 
 	registerUseCase := authapp.NewRegisterUseCase(
 		txManager,
@@ -86,6 +101,7 @@ func main() {
 		slugService,
 		userRoleRepo,
 		bootstrapService,
+		permissionBootstrapService,
 	)
 
 	loginUseCase := authapp.NewLoginUseCase(
@@ -107,6 +123,7 @@ func main() {
 		sessionRepo,
 		identityRepo,
 		userRoleRepo,
+		rolePermissionRepo,
 	)
 	server := httpserver.New(cfg.HTTPPort)
 
@@ -145,6 +162,7 @@ func main() {
 			),
 		),
 	)
+
 	log.Printf("starting auth server on port %s", cfg.HTTPPort)
 
 	if err := server.Start(); err != nil {

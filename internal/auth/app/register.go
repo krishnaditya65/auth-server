@@ -38,6 +38,8 @@ type RegisterUseCase struct {
 
 	userRoleRepo     authorizationdomain.UserRoleRepository
 	bootstrapService *authorizationapp.BootstrapService
+
+	permissionBootstrapService *authorizationapp.PermissionBootstrapService
 }
 
 func NewRegisterUseCase(
@@ -49,6 +51,7 @@ func NewRegisterUseCase(
 	slugService *tenantapp.SlugService,
 	userRoleRepo authorizationdomain.UserRoleRepository,
 	bootstrapService *authorizationapp.BootstrapService,
+	permissionBootstrapService *authorizationapp.PermissionBootstrapService,
 ) *RegisterUseCase {
 
 	return &RegisterUseCase{
@@ -64,6 +67,8 @@ func NewRegisterUseCase(
 
 		userRoleRepo:     userRoleRepo,
 		bootstrapService: bootstrapService,
+
+		permissionBootstrapService: permissionBootstrapService,
 	}
 }
 func (u *RegisterUseCase) Execute(
@@ -162,6 +167,16 @@ func (u *RegisterUseCase) Execute(
 				txCtx,
 				tenant.ID,
 			)
+
+			if err != nil {
+				return err
+			}
+
+			err = u.permissionBootstrapService.
+				BootstrapTenantOwnerPermissions(
+					txCtx,
+					role.ID,
+				)
 
 			if err != nil {
 				return err

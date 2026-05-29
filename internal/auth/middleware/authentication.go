@@ -12,20 +12,23 @@ import (
 )
 
 type AuthenticationMiddleware struct {
-	sessionRepo  sessiondomain.Repository
-	identityRepo identitydomain.Repository
-	userRoleRepo authdomain.UserRoleRepository
+	sessionRepo        sessiondomain.Repository
+	identityRepo       identitydomain.Repository
+	userRoleRepo       authdomain.UserRoleRepository
+	rolePermissionRepo authdomain.RolePermissionRepository
 }
 
 func NewAuthenticationMiddleware(
 	sessionRepo sessiondomain.Repository,
 	identityRepo identitydomain.Repository,
 	userRoleRepo authdomain.UserRoleRepository,
+	rolePermissionRepo authdomain.RolePermissionRepository,
 ) *AuthenticationMiddleware {
 	return &AuthenticationMiddleware{
-		sessionRepo:  sessionRepo,
-		identityRepo: identityRepo,
-		userRoleRepo: userRoleRepo,
+		sessionRepo:        sessionRepo,
+		identityRepo:       identityRepo,
+		userRoleRepo:       userRoleRepo,
+		rolePermissionRepo: rolePermissionRepo,
 	}
 }
 
@@ -111,6 +114,22 @@ func (m *AuthenticationMiddleware) Authenticate(
 				return
 			}
 
+			permissions, err :=
+				m.rolePermissionRepo.
+					GetPermissionsForUser(
+						r.Context(),
+						session.UserID,
+					)
+
+			if err != nil {
+				http.Error(
+					w,
+					"unauthorized",
+					http.StatusUnauthorized,
+				)
+				return
+			}
+
 			p := &principal.Principal{
 				SessionID: session.ID,
 
@@ -122,6 +141,8 @@ func (m *AuthenticationMiddleware) Authenticate(
 				Email: identity.PrimaryEmail,
 
 				Roles: roles,
+
+				Permissions: permissions,
 			}
 
 			ctx := authctx.WithPrincipal(

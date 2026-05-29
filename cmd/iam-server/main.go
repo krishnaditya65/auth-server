@@ -6,9 +6,9 @@ import (
 
 	authapp "github.com/krishnaditya65/auth-server/internal/auth/app"
 	authpostgres "github.com/krishnaditya65/auth-server/internal/auth/infra/postgres"
+	authmiddleware "github.com/krishnaditya65/auth-server/internal/auth/middleware"
 	authhttp "github.com/krishnaditya65/auth-server/internal/auth/transport/http"
 	authorizationapp "github.com/krishnaditya65/auth-server/internal/authorization/app"
-
 	authorizationpostgres "github.com/krishnaditya65/auth-server/internal/authorization/infra/postgres"
 
 	identitypostgres "github.com/krishnaditya65/auth-server/internal/identity/infra/postgres"
@@ -96,47 +96,55 @@ func main() {
 		sessionRepo,
 	)
 
-	meUseCase := authapp.NewMeUseCase(
-		sessionRepo,
-		identityRepo,
-		userRepo,
-		userRoleRepo,
-	)
-
 	// handlers
 	authHandler := authhttp.NewHandler(
 		registerUseCase,
 		loginUseCase,
-		meUseCase,
+	)
+
+	// middleware
+	authMiddleware := authmiddleware.NewAuthenticationMiddleware(
+		sessionRepo,
+		identityRepo,
+		userRoleRepo,
 	)
 	server := httpserver.New(cfg.HTTPPort)
 
 	server.Handle(
 		"GET",
 		"/health",
-		func(w http.ResponseWriter, r *http.Request) {
-			w.Write([]byte("ok"))
-		},
+		http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("ok"))
+			},
+		),
 	)
 
 	server.Handle(
 		"POST",
 		"/register",
-		authHandler.Register,
+		http.HandlerFunc(
+			authHandler.Register,
+		),
 	)
 
 	server.Handle(
 		"POST",
 		"/login",
-		authHandler.Login,
+		http.HandlerFunc(
+			authHandler.Login,
+		),
 	)
 
 	server.Handle(
 		"GET",
 		"/me",
-		authHandler.Me,
+		authMiddleware.Authenticate(
+			http.HandlerFunc(
+				authHandler.Me,
+			),
+		),
 	)
-
 	log.Printf("starting auth server on port %s", cfg.HTTPPort)
 
 	if err := server.Start(); err != nil {

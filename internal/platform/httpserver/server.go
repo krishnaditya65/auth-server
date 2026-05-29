@@ -20,27 +20,40 @@ func New(port string) *Server {
 func (s *Server) Handle(
 	method string,
 	path string,
-	handler http.HandlerFunc,
+	handler http.Handler,
 ) {
-	s.mux.HandleFunc(
-		path,
-		func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != method {
-				http.Error(
-					w,
-					"method not allowed",
-					http.StatusMethodNotAllowed,
-				)
-				return
-			}
 
-			handler(w, r)
-		},
+	s.mux.Handle(
+		path,
+		http.HandlerFunc(
+			func(w http.ResponseWriter, r *http.Request) {
+
+				if r.Method != method {
+					http.Error(
+						w,
+						"method not allowed",
+						http.StatusMethodNotAllowed,
+					)
+					return
+				}
+
+				handler.ServeHTTP(
+					w,
+					r,
+				)
+			},
+		),
 	)
 }
 
 func (s *Server) Start() error {
-	addr := fmt.Sprintf(":%s", s.port)
+	addr := fmt.Sprintf(
+		":%s",
+		s.port,
+	)
 
-	return http.ListenAndServe(addr, s.mux)
+	return http.ListenAndServe(
+		addr,
+		s.mux,
+	)
 }

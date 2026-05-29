@@ -3,10 +3,14 @@ package principal
 type Principal struct {
 	SessionID string
 
+	IdentityID string
+
 	TenantID string
 	UserID   string
 
-	IdentityID string
+	Email string
 
 	Roles []string
+
+	Permissions []string
 }

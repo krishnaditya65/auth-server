@@ -3,46 +3,22 @@ package http
 import (
 	"encoding/json"
 	"net/http"
+
+	authctx "github.com/krishnaditya65/auth-server/internal/shared/context"
 )
 
 func (h *Handler) Me(
 	w http.ResponseWriter,
 	r *http.Request,
 ) {
-
-	sessionID := r.Header.Get(
-		"X-Session-ID",
-	)
-
-	if sessionID == "" {
-		http.Error(
-			w,
-			"missing session",
-			http.StatusUnauthorized,
-		)
-		return
-	}
-
-	result, err := h.meUseCase.Execute(
+	p := authctx.MustPrincipal(
 		r.Context(),
-		sessionID,
 	)
-
-	if err != nil {
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusUnauthorized,
-		)
-		return
-	}
 
 	w.Header().Set(
 		"Content-Type",
 		"application/json",
 	)
 
-	json.NewEncoder(w).Encode(
-		result,
-	)
+	_ = json.NewEncoder(w).Encode(p)
 }

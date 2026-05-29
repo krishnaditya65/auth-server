@@ -2,39 +2,45 @@ package httpserver
 
 import (
 	"fmt"
-	"log"
 	"net/http"
-	"time"
 )
 
 type Server struct {
 	port string
+	mux  *http.ServeMux
 }
 
 func New(port string) *Server {
 	return &Server{
 		port: port,
+		mux:  http.NewServeMux(),
 	}
 }
 
+func (s *Server) Handle(
+	method string,
+	path string,
+	handler http.HandlerFunc,
+) {
+	s.mux.HandleFunc(
+		path,
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.Method != method {
+				http.Error(
+					w,
+					"method not allowed",
+					http.StatusMethodNotAllowed,
+				)
+				return
+			}
+
+			handler(w, r)
+		},
+	)
+}
+
 func (s *Server) Start() error {
-	mux := http.NewServeMux()
+	addr := fmt.Sprintf(":%s", s.port)
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, err := w.Write([]byte("ok"))
-		if err != nil {
-			log.Printf("write response error: %v", err)
-		}
-	})
-
-	server := &http.Server{
-		Addr:         fmt.Sprintf(":%s", s.port),
-		Handler:      mux,
-		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
-
-	return server.ListenAndServe()
+	return http.ListenAndServe(addr, s.mux)
 }

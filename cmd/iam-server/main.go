@@ -1,8 +1,9 @@
 package main
 
 import (
-	"log"
+	"log/slog"
 	"net/http"
+	"os"
 
 	authapp "github.com/krishnaditya65/auth-server/internal/auth/app"
 	authpostgres "github.com/krishnaditya65/auth-server/internal/auth/infra/postgres"
@@ -32,71 +33,58 @@ import (
 )
 
 func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slog.LevelInfo,
+	}))
+	slog.SetDefault(logger)
+
 	cfg := config.Load()
 
 	db, err := platformpostgres.New(cfg.DatabaseURL)
 	if err != nil {
-		log.Fatalf("postgres init failed: %v", err)
+		slog.Error("postgres init failed", "err", err)
+		os.Exit(1)
 	}
 	defer db.Close()
 
 	cache, err := redis.New(cfg.RedisAddr)
 	if err != nil {
-		log.Fatalf("redis init failed: %v", err)
+		slog.Error("redis init failed", "err", err)
+		os.Exit(1)
 	}
 	defer cache.Close()
 
 	msgBus, err := nats.New(cfg.NATSURL)
 	if err != nil {
-		log.Fatalf("nats init failed: %v", err)
+		slog.Error("nats init failed", "err", err)
+		os.Exit(1)
 	}
 	defer msgBus.Close()
 
-	log.Println("postgres connected")
-	log.Println("redis connected")
-	log.Println("nats connected")
+	slog.Info("infrastructure connected", "postgres", cfg.DatabaseURL != "", "env", cfg.AppEnv)
 
-	// transaction manager
 	txManager := pgtx.NewManager(db)
 
 	// repositories
 	identityRepo := identitypostgres.NewRepository(db)
 	credentialRepo := authpostgres.NewRepository(db)
 	tenantRepo := tenantpostgres.NewRepository(db)
-
 	userRepo := postgresuser.NewRepository(db)
-	sessionRepo := sessionpostgres.NewRepository(
-		db,
-	)
-	permissionRepo :=
-		authorizationpostgres.NewPermissionRepository(
-			db,
-		)
-
-	rolePermissionRepo :=
-		authorizationpostgres.NewRolePermissionRepository(
-			db,
-		)
-
-	// usecases
-	slugService := tenantapp.NewSlugService(
-		tenantRepo,
-	)
-
+	sessionRepo := sessionpostgres.NewRepository(db)
+	permissionRepo := authorizationpostgres.NewPermissionRepository(db)
+	rolePermissionRepo := authorizationpostgres.NewRolePermissionRepository(db)
 	roleRepo := authorizationpostgres.NewRoleRepository(db)
-
 	userRoleRepo := authorizationpostgres.NewUserRoleRepository(db)
 
-	bootstrapService := authorizationapp.NewBootstrapService(
-		roleRepo,
+	// services
+	slugService := tenantapp.NewSlugService(tenantRepo)
+	bootstrapService := authorizationapp.NewBootstrapService(roleRepo)
+	permissionBootstrapService := authorizationapp.NewPermissionBootstrapService(
+		permissionRepo,
+		rolePermissionRepo,
 	)
-	//services
-	permissionBootstrapService :=
-		authorizationapp.NewPermissionBootstrapService(
-			permissionRepo,
-			rolePermissionRepo,
-		)
 
+	// use cases
 	registerUseCase := authapp.NewRegisterUseCase(
 		txManager,
 		identityRepo,
@@ -117,73 +105,53 @@ func main() {
 		sessionRepo,
 	)
 
-	identityGetUserUseCase :=
-		identityapp.NewGetUserUseCase(
-			userRepo,
-		)
+	refreshUseCase := authapp.NewRefreshUseCase(sessionRepo)
 
-	listUsersUseCase :=
-		identityapp.NewListUsersUseCase(
-			userRepo,
-		)
+	logoutUseCase := authapp.NewLogoutUseCase(sessionRepo)
 
-	createUserUseCase :=
-		identityapp.NewCreateUserUseCase(
-			txManager,
-			identityRepo,
-			credentialRepo,
-			userRepo,
-			roleRepo,
-			userRoleRepo,
-		)
+	identityGetUserUseCase := identityapp.NewGetUserUseCase(userRepo)
+	listUsersUseCase := identityapp.NewListUsersUseCase(userRepo)
+	createUserUseCase := identityapp.NewCreateUserUseCase(
+		txManager,
+		identityRepo,
+		credentialRepo,
+		userRepo,
+		roleRepo,
+		userRoleRepo,
+	)
 
-	createRoleUseCase :=
-		authorizationapp.NewCreateRoleUseCase(
-			roleRepo,
-		)
+	createRoleUseCase := authorizationapp.NewCreateRoleUseCase(roleRepo)
+	listRolesUseCase := authorizationapp.NewListRolesUseCase(roleRepo)
+	assignPermissionUseCase := authorizationapp.NewAssignPermissionToRoleUseCase(
+		roleRepo,
+		permissionRepo,
+		rolePermissionRepo,
+	)
+	listRolePermissionsUseCase := authorizationapp.NewListRolePermissionsUseCase(
+		roleRepo,
+		rolePermissionRepo,
+	)
 
-	listRolesUseCase :=
-		authorizationapp.NewListRolesUseCase(
-			roleRepo,
-		)
-
-	assignPermissionUseCase :=
-		authorizationapp.NewAssignPermissionToRoleUseCase(
-			roleRepo,
-			permissionRepo,
-			rolePermissionRepo,
-		)
-
-	listRolePermissionsUseCase :=
-		authorizationapp.NewListRolePermissionsUseCase(
-			roleRepo,
-			rolePermissionRepo,
-		)
-	refreshUseCase :=
-		authapp.NewRefreshUseCase(
-			sessionRepo,
-		)
-
-		// handlers
+	// handlers
 	authHandler := authhttp.NewHandler(
 		registerUseCase,
 		loginUseCase,
 		refreshUseCase,
+		logoutUseCase,
 	)
 
-	identityHandler :=
-		identityhttp.NewHandler(
-			identityGetUserUseCase,
-			listUsersUseCase,
-			createUserUseCase,
-		)
-	authorizationHandler :=
-		authorizationhttp.NewHandler(
-			createRoleUseCase,
-			listRolesUseCase,
-			assignPermissionUseCase,
-			listRolePermissionsUseCase,
-		)
+	identityHandler := identityhttp.NewHandler(
+		identityGetUserUseCase,
+		listUsersUseCase,
+		createUserUseCase,
+	)
+
+	authorizationHandler := authorizationhttp.NewHandler(
+		createRoleUseCase,
+		listRolesUseCase,
+		assignPermissionUseCase,
+		listRolePermissionsUseCase,
+	)
 
 	// middleware
 	authMiddleware := authmiddleware.NewAuthenticationMiddleware(
@@ -196,162 +164,40 @@ func main() {
 	server := httpserver.New(cfg.HTTPPort)
 	r := server.Router()
 
-	r.Get(
-		"/health",
-		func(
-			w http.ResponseWriter,
-			r *http.Request,
-		) {
-			w.Write([]byte("ok"))
-		},
-	)
+	r.Use(httpserver.CORS)
 
-	r.Post(
-		"/register",
-		authHandler.Register,
-	)
+	// public routes
+	r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("ok"))
+	})
+	r.Post("/register", authHandler.Register)
+	r.Post("/login", authHandler.Login)
+	r.Post("/refresh", authHandler.Refresh)
 
-	r.Post(
-		"/login",
-		authHandler.Login,
-	)
+	// authenticated routes
+	withAuth := func(next http.Handler) http.Handler {
+		return authMiddleware.Authenticate(next)
+	}
+	withPerm := func(p string) func(http.Handler) http.Handler {
+		return authorizationmiddleware.RequirePermission(p)
+	}
 
-	r.With(
-		func(next http.Handler) http.Handler {
-			return authMiddleware.Authenticate(
-				next,
-			)
-		},
-	).Get(
-		"/me",
-		authHandler.Me,
-	)
+	r.With(withAuth).Get("/me", authHandler.Me)
+	r.With(withAuth).Post("/logout", authHandler.Logout)
 
-	r.With(
-		func(next http.Handler) http.Handler {
-			return authMiddleware.Authenticate(
-				next,
-			)
-		},
-		func(next http.Handler) http.Handler {
-			return authorizationmiddleware.
-				RequirePermission(
-					"users:read",
-				)(
-				next,
-			)
-		},
-	).Get(
-		"/users/{userID}",
-		identityHandler.GetUser,
-	)
+	r.With(withAuth, withPerm("users:read")).Get("/users", identityHandler.ListUsers)
+	r.With(withAuth, withPerm("users:read")).Get("/users/{userID}", identityHandler.GetUser)
+	r.With(withAuth, withPerm("users:create")).Post("/users", identityHandler.CreateUser)
 
-	r.With(
-		func(next http.Handler) http.Handler {
-			return authMiddleware.Authenticate(
-				next,
-			)
-		},
-		func(next http.Handler) http.Handler {
-			return authorizationmiddleware.
-				RequirePermission(
-					"users:read",
-				)(
-				next,
-			)
-		},
-	).Get(
-		"/users",
-		identityHandler.ListUsers,
-	)
+	r.With(withAuth, withPerm("roles:create")).Post("/roles", authorizationHandler.CreateRole)
+	r.With(withAuth, withPerm("roles:read")).Get("/roles", authorizationHandler.ListRoles)
+	r.With(withAuth, withPerm("roles:update")).Post("/roles/{roleID}/permissions", authorizationHandler.AssignPermission)
+	r.With(withAuth, withPerm("roles:read")).Get("/roles/{roleID}/permissions", authorizationHandler.ListRolePermissions)
 
-	r.With(
-		func(next http.Handler) http.Handler {
-			return authMiddleware.Authenticate(
-				next,
-			)
-		},
-		func(next http.Handler) http.Handler {
-			return authorizationmiddleware.
-				RequirePermission(
-					"users:create",
-				)(
-				next,
-			)
-		},
-	).Post(
-		"/users",
-		identityHandler.CreateUser,
-	)
-
-	r.With(
-		func(next http.Handler) http.Handler {
-			return authMiddleware.Authenticate(next)
-		},
-		func(next http.Handler) http.Handler {
-			return authorizationmiddleware.
-				RequirePermission(
-					"roles:create",
-				)(next)
-		},
-	).Post(
-		"/roles",
-		authorizationHandler.CreateRole,
-	)
-
-	r.With(
-		func(next http.Handler) http.Handler {
-			return authMiddleware.Authenticate(next)
-		},
-		func(next http.Handler) http.Handler {
-			return authorizationmiddleware.
-				RequirePermission(
-					"roles:read",
-				)(next)
-		},
-	).Get(
-		"/roles",
-		authorizationHandler.ListRoles,
-	)
-
-	r.With(
-		func(next http.Handler) http.Handler {
-			return authMiddleware.Authenticate(next)
-		},
-		func(next http.Handler) http.Handler {
-			return authorizationmiddleware.
-				RequirePermission(
-					"roles:update",
-				)(next)
-		},
-	).Post(
-		"/roles/{roleID}/permissions",
-		authorizationHandler.AssignPermission,
-	)
-
-	r.With(
-		func(next http.Handler) http.Handler {
-			return authMiddleware.Authenticate(next)
-		},
-		func(next http.Handler) http.Handler {
-			return authorizationmiddleware.
-				RequirePermission(
-					"roles:read",
-				)(next)
-		},
-	).Get(
-		"/roles/{roleID}/permissions",
-		authorizationHandler.ListRolePermissions,
-	)
-
-	r.Post(
-		"/refresh",
-		authHandler.Refresh,
-	)
-
-	log.Printf("starting auth server on port %s", cfg.HTTPPort)
+	slog.Info("starting auth server", "port", cfg.HTTPPort, "env", cfg.AppEnv)
 
 	if err := server.Start(); err != nil {
-		log.Fatal(err)
+		slog.Error("server failed", "err", err)
+		os.Exit(1)
 	}
 }

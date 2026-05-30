@@ -1,0 +1,29 @@
+package http
+
+import (
+	"net/http"
+
+	authapp "github.com/krishnaditya65/auth-server/internal/auth/app"
+	authctx "github.com/krishnaditya65/auth-server/internal/shared/context"
+)
+
+func (h *Handler) Logout(
+	w http.ResponseWriter,
+	r *http.Request,
+) {
+	p, ok := authctx.Principal(r.Context())
+	if !ok {
+		writeError(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	err := h.logoutUseCase.Execute(r.Context(), authapp.LogoutInput{
+		SessionID: p.SessionID,
+	})
+	if err != nil {
+		writeError(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}

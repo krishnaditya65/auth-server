@@ -7,16 +7,14 @@ import (
 	tenantdomain "github.com/krishnaditya65/auth-server/internal/tenant/domain"
 )
 
+const maxSlugAttempts = 5
+
 type SlugService struct {
 	repo tenantdomain.Repository
 }
 
-func NewSlugService(
-	repo tenantdomain.Repository,
-) *SlugService {
-	return &SlugService{
-		repo: repo,
-	}
+func NewSlugService(repo tenantdomain.Repository) *SlugService {
+	return &SlugService{repo: repo}
 }
 
 func (s *SlugService) GenerateUniqueSlug(
@@ -24,10 +22,7 @@ func (s *SlugService) GenerateUniqueSlug(
 	base string,
 ) (string, error) {
 
-	exists, err := s.repo.ExistsBySlug(
-		ctx,
-		base,
-	)
+	exists, err := s.repo.ExistsBySlug(ctx, base)
 	if err != nil {
 		return "", err
 	}
@@ -36,18 +31,10 @@ func (s *SlugService) GenerateUniqueSlug(
 		return base, nil
 	}
 
-	for i := 1; i < 10000; i++ {
-		candidate := fmt.Sprintf(
-			"%s-%d",
-			base,
-			i,
-		)
+	for i := 1; i <= maxSlugAttempts; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
 
-		exists, err := s.repo.ExistsBySlug(
-			ctx,
-			candidate,
-		)
-
+		exists, err := s.repo.ExistsBySlug(ctx, candidate)
 		if err != nil {
 			return "", err
 		}
@@ -57,7 +44,5 @@ func (s *SlugService) GenerateUniqueSlug(
 		}
 	}
 
-	return "", fmt.Errorf(
-		"unable to generate unique slug",
-	)
+	return "", fmt.Errorf("slug %q is unavailable after %d attempts", base, maxSlugAttempts)
 }

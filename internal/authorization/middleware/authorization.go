@@ -10,36 +10,22 @@ func RequirePermission(
 	permission string,
 ) func(http.Handler) http.Handler {
 
-	return func(
-		next http.Handler,
-	) http.Handler {
+	return func(next http.Handler) http.Handler {
 
-		return http.HandlerFunc(
-			func(
-				w http.ResponseWriter,
-				r *http.Request,
-			) {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 
-				p := authctx.MustPrincipal(
-					r.Context(),
-				)
+			p, ok := authctx.Principal(r.Context())
+			if !ok {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
 
-				if !p.HasPermission(
-					permission,
-				) {
-					http.Error(
-						w,
-						"forbidden",
-						http.StatusForbidden,
-					)
-					return
-				}
+			if !p.HasPermission(permission) {
+				http.Error(w, "forbidden", http.StatusForbidden)
+				return
+			}
 
-				next.ServeHTTP(
-					w,
-					r,
-				)
-			},
-		)
+			next.ServeHTTP(w, r)
+		})
 	}
 }

@@ -3,23 +3,18 @@ package postgres
 import (
 	"context"
 
-	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
+	pgtx "github.com/krishnaditya65/auth-server/internal/platform/postgres/tx"
 )
 
 type PermissionRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewPermissionRepository(
-	db *pgxpool.Pool,
-) *PermissionRepository {
-	return &PermissionRepository{
-		db: db,
-	}
+func NewPermissionRepository(db *pgxpool.Pool) *PermissionRepository {
+	return &PermissionRepository{db: db}
 }
 
 func (r *PermissionRepository) Create(
@@ -37,9 +32,7 @@ func (r *PermissionRepository) Create(
 		VALUES ($1,$2,$3,$4)
 	`
 
-	_, err := r.executor(ctx).Exec(
-		ctx,
-		query,
+	_, err := r.executor(ctx).Exec(ctx, query,
 		permission.ID,
 		permission.Name,
 		permission.Description,
@@ -64,11 +57,7 @@ func (r *PermissionRepository) GetByID(
 		WHERE id = $1
 	`
 
-	row := r.executor(ctx).QueryRow(
-		ctx,
-		query,
-		id,
-	)
+	row := r.executor(ctx).QueryRow(ctx, query, id)
 
 	var permission authdomain.Permission
 
@@ -101,11 +90,7 @@ func (r *PermissionRepository) GetByName(
 		WHERE name = $1
 	`
 
-	row := r.executor(ctx).QueryRow(
-		ctx,
-		query,
-		name,
-	)
+	row := r.executor(ctx).QueryRow(ctx, query, name)
 
 	var permission authdomain.Permission
 
@@ -137,10 +122,7 @@ func (r *PermissionRepository) List(
 		ORDER BY name
 	`
 
-	rows, err := r.executor(ctx).Query(
-		ctx,
-		query,
-	)
+	rows, err := r.executor(ctx).Query(ctx, query)
 
 	if err != nil {
 		return nil, err
@@ -165,43 +147,15 @@ func (r *PermissionRepository) List(
 			return nil, err
 		}
 
-		permissions = append(
-			permissions,
-			&permission,
-		)
+		permissions = append(permissions, &permission)
 	}
 
 	return permissions, nil
 }
 
-type permissionExecutor interface {
-	Exec(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) (pgconn.CommandTag, error)
-
-	QueryRow(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) pgx.Row
-
-	Query(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) (pgx.Rows, error)
-}
-
-func (r *PermissionRepository) executor(
-	ctx context.Context,
-) permissionExecutor {
-
-	tx, ok := ctx.Value("tx").(pgx.Tx)
-	if ok {
+func (r *PermissionRepository) executor(ctx context.Context) pgtx.Executor {
+	if tx, ok := pgtx.FromContext(ctx); ok {
 		return tx
 	}
-
 	return r.db
 }

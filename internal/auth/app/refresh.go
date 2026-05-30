@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	sessiondomain "github.com/krishnaditya65/auth-server/internal/session/domain"
@@ -40,21 +39,12 @@ func (u *RefreshUseCase) Execute(
 	input RefreshInput,
 ) (*RefreshOutput, error) {
 
-	refreshHash :=
-		sharedtoken.Hash(
-			input.RefreshToken,
-		)
+	refreshHash := sharedtoken.Hash(input.RefreshToken)
 
-	fmt.Println(
-		"REFRESH HASH:",
+	session, err := u.sessionRepo.GetByRefreshTokenHash(
+		ctx,
 		refreshHash,
 	)
-
-	session, err :=
-		u.sessionRepo.GetByRefreshTokenHash(
-			ctx,
-			refreshHash,
-		)
 
 	if err != nil {
 		return nil, sharederrors.ErrUnauthorized
@@ -64,9 +54,7 @@ func (u *RefreshUseCase) Execute(
 		return nil, sharederrors.ErrUnauthorized
 	}
 
-	if time.Now().UTC().After(
-		session.ExpiresAt,
-	) {
+	if time.Now().UTC().After(session.ExpiresAt) {
 		return nil, sharederrors.ErrUnauthorized
 	}
 
@@ -79,17 +67,13 @@ func (u *RefreshUseCase) Execute(
 		return nil, err
 	}
 
-	newRefreshToken, err :=
-		sharedtoken.GenerateRandom(32)
+	newRefreshToken, err := sharedtoken.GenerateRandom(32)
 
 	if err != nil {
 		return nil, err
 	}
 
-	newRefreshHash :=
-		sharedtoken.Hash(
-			newRefreshToken,
-		)
+	newRefreshHash := sharedtoken.Hash(newRefreshToken)
 
 	now := time.Now().UTC()
 
@@ -112,9 +96,7 @@ func (u *RefreshUseCase) Execute(
 
 		UserAgent: session.UserAgent,
 
-		ExpiresAt: now.Add(
-			24 * time.Hour,
-		),
+		ExpiresAt: now.Add(24 * time.Hour),
 
 		CreatedAt: now,
 	}
@@ -129,12 +111,9 @@ func (u *RefreshUseCase) Execute(
 	}
 
 	return &RefreshOutput{
-		SessionID: newSession.ID,
-
-		TenantID: newSession.TenantID,
-
-		UserID: newSession.UserID,
-
+		SessionID:    newSession.ID,
+		TenantID:     newSession.TenantID,
+		UserID:       newSession.UserID,
 		RefreshToken: newRefreshToken,
 	}, nil
 }

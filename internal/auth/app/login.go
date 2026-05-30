@@ -2,7 +2,6 @@ package app
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	authdomain "github.com/krishnaditya65/auth-server/internal/auth/domain"
@@ -16,8 +15,10 @@ import (
 )
 
 type LoginInput struct {
-	Email    string
-	Password string
+	Email     string
+	Password  string
+	IPAddress string
+	UserAgent string
 }
 
 type LoginOutput struct {
@@ -112,19 +113,11 @@ func (u *LoginUseCase) Execute(
 		return nil, err
 	}
 
-	refreshHash :=
-		sharedtoken.Hash(
-			refreshToken,
-		)
+	refreshHash := sharedtoken.Hash(refreshToken)
 
 	now := time.Now().UTC()
-	ip := "127.0.0.1"
 
-	fmt.Println(
-		"LOGIN HASH:",
-		refreshHash,
-	)
-
+	ip := input.IPAddress
 	session := &sessiondomain.Session{
 		ID: id.New(),
 
@@ -135,25 +128,23 @@ func (u *LoginUseCase) Execute(
 		RefreshTokenHash: refreshHash,
 
 		IPAddress: &ip,
-		UserAgent: "",
+		UserAgent: input.UserAgent,
 
-		ExpiresAt: now.Add(
-			24 * time.Hour,
-		),
+		ExpiresAt: now.Add(24 * time.Hour),
 
 		CreatedAt: now,
 	}
+
 	err = u.sessionRepo.Create(ctx, session)
 	if err != nil {
 		return nil, err
 	}
 
 	return &LoginOutput{
-		SessionID: session.ID,
-		TenantID:  user.TenantID,
-		UserID:    user.ID,
-		Roles:     roles,
-
+		SessionID:    session.ID,
+		TenantID:     user.TenantID,
+		UserID:       user.ID,
+		Roles:        roles,
 		RefreshToken: refreshToken,
 	}, nil
 }

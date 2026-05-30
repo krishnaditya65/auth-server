@@ -12,10 +12,7 @@ type Server struct {
 	mux  *chi.Mux
 }
 
-func New(
-	port string,
-) *Server {
-
+func New(port string) *Server {
 	return &Server{
 		port: port,
 		mux:  chi.NewRouter(),
@@ -27,14 +24,24 @@ func (s *Server) Router() *chi.Mux {
 }
 
 func (s *Server) Start() error {
+	addr := fmt.Sprintf(":%s", s.port)
+	return http.ListenAndServe(addr, s.mux)
+}
 
-	addr := fmt.Sprintf(
-		":%s",
-		s.port,
-	)
+// CORS is a chi-compatible middleware that adds permissive CORS headers and handles preflight requests.
+// Restrict Access-Control-Allow-Origin in production once a frontend origin is known.
+func CORS(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Session-ID")
+		w.Header().Set("Access-Control-Max-Age", "86400")
 
-	return http.ListenAndServe(
-		addr,
-		s.mux,
-	)
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }

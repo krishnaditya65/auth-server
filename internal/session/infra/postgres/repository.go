@@ -2,25 +2,19 @@ package postgres
 
 import (
 	"context"
-	"fmt"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	sessiondomain "github.com/krishnaditya65/auth-server/internal/session/domain"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	"github.com/jackc/pgx/v5/pgxpool"
+	pgtx "github.com/krishnaditya65/auth-server/internal/platform/postgres/tx"
 )
 
 type Repository struct {
 	db *pgxpool.Pool
 }
 
-func NewRepository(
-	db *pgxpool.Pool,
-) *Repository {
-	return &Repository{
-		db: db,
-	}
+func NewRepository(db *pgxpool.Pool) *Repository {
+	return &Repository{db: db}
 }
 
 func (r *Repository) Create(
@@ -30,21 +24,19 @@ func (r *Repository) Create(
 
 	query := `
 		INSERT INTO sessions (
-	id,
-	tenant_id,
-	identity_id,
-	user_id,
-	refresh_token_hash,
-	parent_session_id,
-	ip_address,
-	user_agent,
-	expires_at,
-	revoked_at,
-	created_at
-)
-VALUES (
-	$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11
-)
+			id,
+			tenant_id,
+			identity_id,
+			user_id,
+			refresh_token_hash,
+			parent_session_id,
+			ip_address,
+			user_agent,
+			expires_at,
+			revoked_at,
+			created_at
+		)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 	`
 
 	_, err := r.executor(ctx).Exec(
@@ -88,11 +80,7 @@ func (r *Repository) GetByID(
 		WHERE id = $1
 	`
 
-	row := r.executor(ctx).QueryRow(
-		ctx,
-		query,
-		id,
-	)
+	row := r.executor(ctx).QueryRow(ctx, query, id)
 
 	var session sessiondomain.Session
 
@@ -115,32 +103,6 @@ func (r *Repository) GetByID(
 	}
 
 	return &session, nil
-}
-
-type executor interface {
-	Exec(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) (pgconn.CommandTag, error)
-
-	QueryRow(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) pgx.Row
-}
-
-func (r *Repository) executor(
-	ctx context.Context,
-) executor {
-
-	tx, ok := ctx.Value("tx").(pgx.Tx)
-	if ok {
-		return tx
-	}
-
-	return r.db
 }
 
 func (r *Repository) GetByRefreshTokenHash(
@@ -165,11 +127,7 @@ func (r *Repository) GetByRefreshTokenHash(
 		WHERE refresh_token_hash = $1
 	`
 
-	row := r.executor(ctx).QueryRow(
-		ctx,
-		query,
-		hash,
-	)
+	row := r.executor(ctx).QueryRow(ctx, query, hash)
 
 	var session sessiondomain.Session
 
@@ -188,10 +146,6 @@ func (r *Repository) GetByRefreshTokenHash(
 	)
 
 	if err != nil {
-		fmt.Println(
-			"GET BY REFRESH HASH ERROR:",
-			err,
-		)
 		return nil, err
 	}
 
@@ -209,11 +163,14 @@ func (r *Repository) Revoke(
 		WHERE id = $1
 	`
 
-	_, err := r.executor(ctx).Exec(
-		ctx,
-		query,
-		id,
-	)
+	_, err := r.executor(ctx).Exec(ctx, query, id)
 
 	return err
+}
+
+func (r *Repository) executor(ctx context.Context) pgtx.Executor {
+	if tx, ok := pgtx.FromContext(ctx); ok {
+		return tx
+	}
+	return r.db
 }

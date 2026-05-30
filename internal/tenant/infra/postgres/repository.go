@@ -3,10 +3,9 @@ package postgres
 import (
 	"context"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	pgtx "github.com/krishnaditya65/auth-server/internal/platform/postgres/tx"
 	tenantdomain "github.com/krishnaditya65/auth-server/internal/tenant/domain"
 )
 
@@ -15,9 +14,7 @@ type Repository struct {
 }
 
 func NewRepository(db *pgxpool.Pool) *Repository {
-	return &Repository{
-		db: db,
-	}
+	return &Repository{db: db}
 }
 
 func (r *Repository) Create(
@@ -139,11 +136,7 @@ func (r *Repository) ExistsBySlug(
 
 	var exists bool
 
-	err := r.executor(ctx).QueryRow(
-		ctx,
-		query,
-		slug,
-	).Scan(&exists)
+	err := r.executor(ctx).QueryRow(ctx, query, slug).Scan(&exists)
 
 	if err != nil {
 		return false, err
@@ -152,25 +145,9 @@ func (r *Repository) ExistsBySlug(
 	return exists, nil
 }
 
-type executor interface {
-	Exec(
-		ctx context.Context,
-		sql string,
-		arguments ...any,
-	) (pgconn.CommandTag, error)
-
-	QueryRow(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) pgx.Row
-}
-
-func (r *Repository) executor(ctx context.Context) executor {
-	tx, ok := ctx.Value("tx").(pgx.Tx)
-	if ok {
+func (r *Repository) executor(ctx context.Context) pgtx.Executor {
+	if tx, ok := pgtx.FromContext(ctx); ok {
 		return tx
 	}
-
 	return r.db
 }

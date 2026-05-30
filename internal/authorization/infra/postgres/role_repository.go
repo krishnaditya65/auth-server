@@ -3,23 +3,18 @@ package postgres
 import (
 	"context"
 
-	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
+	pgtx "github.com/krishnaditya65/auth-server/internal/platform/postgres/tx"
 )
 
 type RoleRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewRoleRepository(
-	db *pgxpool.Pool,
-) *RoleRepository {
-	return &RoleRepository{
-		db: db,
-	}
+func NewRoleRepository(db *pgxpool.Pool) *RoleRepository {
+	return &RoleRepository{db: db}
 }
 
 func (r *RoleRepository) Create(
@@ -28,19 +23,17 @@ func (r *RoleRepository) Create(
 ) error {
 
 	query := `
-INSERT INTO roles (
-    id,
-    tenant_id,
-    name,
-    description,
-    created_at
-)
+		INSERT INTO roles (
+		    id,
+		    tenant_id,
+		    name,
+		    description,
+		    created_at
+		)
 		VALUES ($1,$2,$3,$4,$5)
 	`
 
-	_, err := r.executor(ctx).Exec(
-		ctx,
-		query,
+	_, err := r.executor(ctx).Exec(ctx, query,
 		role.ID,
 		role.TenantID,
 		role.Name,
@@ -62,16 +55,12 @@ func (r *RoleRepository) GetByID(
 			tenant_id,
 			name,
 			description,
-			created_at 
+			created_at
 		FROM roles
 		WHERE id = $1
 	`
 
-	row := r.executor(ctx).QueryRow(
-		ctx,
-		query,
-		id,
-	)
+	row := r.executor(ctx).QueryRow(ctx, query, id)
 
 	var role authdomain.Role
 
@@ -108,12 +97,7 @@ func (r *RoleRepository) GetByTenantAndName(
 		  AND name = $2
 	`
 
-	row := r.executor(ctx).QueryRow(
-		ctx,
-		query,
-		tenantID,
-		name,
-	)
+	row := r.executor(ctx).QueryRow(ctx, query, tenantID, name)
 
 	var role authdomain.Role
 
@@ -149,11 +133,7 @@ func (r *RoleRepository) ListByTenant(
 		ORDER BY name
 	`
 
-	rows, err := r.executor(ctx).Query(
-		ctx,
-		query,
-		tenantID,
-	)
+	rows, err := r.executor(ctx).Query(ctx, query, tenantID)
 
 	if err != nil {
 		return nil, err
@@ -179,42 +159,15 @@ func (r *RoleRepository) ListByTenant(
 			return nil, err
 		}
 
-		roles = append(
-			roles,
-			&role,
-		)
+		roles = append(roles, &role)
 	}
 
 	return roles, nil
 }
 
-type roleExecutor interface {
-	Exec(
-		ctx context.Context,
-		sql string,
-		arguments ...any,
-	) (pgconn.CommandTag, error)
-
-	QueryRow(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) pgx.Row
-	Query(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) (pgx.Rows, error)
-}
-
-func (r *RoleRepository) executor(
-	ctx context.Context,
-) roleExecutor {
-
-	tx, ok := ctx.Value("tx").(pgx.Tx)
-	if ok {
+func (r *RoleRepository) executor(ctx context.Context) pgtx.Executor {
+	if tx, ok := pgtx.FromContext(ctx); ok {
 		return tx
 	}
-
 	return r.db
 }

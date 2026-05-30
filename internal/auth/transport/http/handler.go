@@ -12,18 +12,21 @@ type Handler struct {
 	registerUseCase *authapp.RegisterUseCase
 	loginUseCase    *authapp.LoginUseCase
 	refreshUseCase  *authapp.RefreshUseCase
+	logoutUseCase   *authapp.LogoutUseCase
 }
 
 func NewHandler(
 	registerUseCase *authapp.RegisterUseCase,
 	loginUseCase *authapp.LoginUseCase,
 	refreshUseCase *authapp.RefreshUseCase,
+	logoutUseCase *authapp.LogoutUseCase,
 ) *Handler {
 
 	return &Handler{
 		registerUseCase: registerUseCase,
 		loginUseCase:    loginUseCase,
 		refreshUseCase:  refreshUseCase,
+		logoutUseCase:   logoutUseCase,
 	}
 }
 
@@ -33,18 +36,27 @@ func (h *Handler) Register(
 ) {
 	var req RegisterRequest
 
-	err := json.NewDecoder(r.Body).Decode(&req)
-	if err != nil {
-		http.Error(w, "invalid request body", http.StatusBadRequest)
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
 
 	if req.Email == "" || req.Password == "" {
-		http.Error(w, "email and password required", http.StatusBadRequest)
+		writeError(w, "email and password are required", http.StatusBadRequest)
 		return
 	}
 
-	err = h.registerUseCase.Execute(
+	if !isValidEmail(req.Email) {
+		writeError(w, "invalid email format", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Password) < 8 {
+		writeError(w, "password must be at least 8 characters", http.StatusBadRequest)
+		return
+	}
+
+	err := h.registerUseCase.Execute(
 		r.Context(),
 		authapp.RegisterInput{
 			Email:    req.Email,
@@ -54,20 +66,14 @@ func (h *Handler) Register(
 
 	if err != nil {
 		if err == sharederrors.ErrConflict {
-			http.Error(w, "email already exists", http.StatusConflict)
+			writeError(w, "email already registered", http.StatusConflict)
 			return
 		}
-
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeError(w, "internal error", http.StatusInternalServerError)
 		return
-	}
-
-	resp := RegisterResponse{
-		Message: "registration successful",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-
-	json.NewEncoder(w).Encode(resp)
+	json.NewEncoder(w).Encode(RegisterResponse{Message: "registration successful"})
 }

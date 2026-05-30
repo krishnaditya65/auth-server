@@ -3,23 +3,18 @@ package postgres
 import (
 	"context"
 
-	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
+	pgtx "github.com/krishnaditya65/auth-server/internal/platform/postgres/tx"
 )
 
 type UserRoleRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewUserRoleRepository(
-	db *pgxpool.Pool,
-) *UserRoleRepository {
-	return &UserRoleRepository{
-		db: db,
-	}
+func NewUserRoleRepository(db *pgxpool.Pool) *UserRoleRepository {
+	return &UserRoleRepository{db: db}
 }
 
 func (r *UserRoleRepository) AssignRole(
@@ -35,40 +30,12 @@ func (r *UserRoleRepository) AssignRole(
 		VALUES ($1,$2)
 	`
 
-	_, err := r.executor(ctx).Exec(
-		ctx,
-		query,
+	_, err := r.executor(ctx).Exec(ctx, query,
 		userRole.UserID,
 		userRole.RoleID,
 	)
 
 	return err
-}
-
-type userRoleExecutor interface {
-	Exec(
-		ctx context.Context,
-		sql string,
-		arguments ...any,
-	) (pgconn.CommandTag, error)
-
-	Query(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) (pgx.Rows, error)
-}
-
-func (r *UserRoleRepository) executor(
-	ctx context.Context,
-) userRoleExecutor {
-
-	tx, ok := ctx.Value("tx").(pgx.Tx)
-	if ok {
-		return tx
-	}
-
-	return r.db
 }
 
 func (r *UserRoleRepository) GetRolesForUser(
@@ -84,11 +51,7 @@ func (r *UserRoleRepository) GetRolesForUser(
 		WHERE ur.user_id = $1
 	`
 
-	rows, err := r.db.Query(
-		ctx,
-		query,
-		userID,
-	)
+	rows, err := r.executor(ctx).Query(ctx, query, userID)
 
 	if err != nil {
 		return nil, err
@@ -101,19 +64,21 @@ func (r *UserRoleRepository) GetRolesForUser(
 	for rows.Next() {
 		var role string
 
-		err := rows.Scan(
-			&role,
-		)
+		err := rows.Scan(&role)
 
 		if err != nil {
 			return nil, err
 		}
 
-		roles = append(
-			roles,
-			role,
-		)
+		roles = append(roles, role)
 	}
 
 	return roles, nil
+}
+
+func (r *UserRoleRepository) executor(ctx context.Context) pgtx.Executor {
+	if tx, ok := pgtx.FromContext(ctx); ok {
+		return tx
+	}
+	return r.db
 }

@@ -3,23 +3,18 @@ package postgres
 import (
 	"context"
 
-	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
-
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
+	pgtx "github.com/krishnaditya65/auth-server/internal/platform/postgres/tx"
 )
 
 type RolePermissionRepository struct {
 	db *pgxpool.Pool
 }
 
-func NewRolePermissionRepository(
-	db *pgxpool.Pool,
-) *RolePermissionRepository {
-	return &RolePermissionRepository{
-		db: db,
-	}
+func NewRolePermissionRepository(db *pgxpool.Pool) *RolePermissionRepository {
+	return &RolePermissionRepository{db: db}
 }
 
 func (r *RolePermissionRepository) AssignPermission(
@@ -35,9 +30,7 @@ func (r *RolePermissionRepository) AssignPermission(
 		VALUES ($1,$2)
 	`
 
-	_, err := r.executor(ctx).Exec(
-		ctx,
-		query,
+	_, err := r.executor(ctx).Exec(ctx, query,
 		rolePermission.RoleID,
 		rolePermission.PermissionID,
 	)
@@ -58,11 +51,7 @@ func (r *RolePermissionRepository) GetPermissionsForRole(
 		WHERE rp.role_id = $1
 	`
 
-	rows, err := r.executor(ctx).Query(
-		ctx,
-		query,
-		roleID,
-	)
+	rows, err := r.executor(ctx).Query(ctx, query, roleID)
 
 	if err != nil {
 		return nil, err
@@ -76,18 +65,13 @@ func (r *RolePermissionRepository) GetPermissionsForRole(
 
 		var permission string
 
-		err := rows.Scan(
-			&permission,
-		)
+		err := rows.Scan(&permission)
 
 		if err != nil {
 			return nil, err
 		}
 
-		permissions = append(
-			permissions,
-			permission,
-		)
+		permissions = append(permissions, permission)
 	}
 
 	return permissions, nil
@@ -111,11 +95,7 @@ func (r *RolePermissionRepository) GetPermissionsForUser(
 		WHERE ur.user_id = $1
 	`
 
-	rows, err := r.executor(ctx).Query(
-		ctx,
-		query,
-		userID,
-	)
+	rows, err := r.executor(ctx).Query(ctx, query, userID)
 
 	if err != nil {
 		return nil, err
@@ -129,45 +109,21 @@ func (r *RolePermissionRepository) GetPermissionsForUser(
 
 		var permission string
 
-		err := rows.Scan(
-			&permission,
-		)
+		err := rows.Scan(&permission)
 
 		if err != nil {
 			return nil, err
 		}
 
-		permissions = append(
-			permissions,
-			permission,
-		)
+		permissions = append(permissions, permission)
 	}
 
 	return permissions, nil
 }
 
-type rolePermissionExecutor interface {
-	Exec(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) (pgconn.CommandTag, error)
-
-	Query(
-		ctx context.Context,
-		sql string,
-		args ...any,
-	) (pgx.Rows, error)
-}
-
-func (r *RolePermissionRepository) executor(
-	ctx context.Context,
-) rolePermissionExecutor {
-
-	tx, ok := ctx.Value("tx").(pgx.Tx)
-	if ok {
+func (r *RolePermissionRepository) executor(ctx context.Context) pgtx.Executor {
+	if tx, ok := pgtx.FromContext(ctx); ok {
 		return tx
 	}
-
 	return r.db
 }

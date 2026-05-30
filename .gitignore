@@ -27,3 +27,6 @@ coverage.html
 # temp
 tmp/
 .cache/
+
+# docs (generated, not versioned)
+ARCHITECTURE.md

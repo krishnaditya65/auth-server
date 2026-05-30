@@ -3,6 +3,7 @@ package middleware
 import (
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	authdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
@@ -10,6 +11,7 @@ import (
 	sessiondomain "github.com/krishnaditya65/auth-server/internal/session/domain"
 	authctx "github.com/krishnaditya65/auth-server/internal/shared/context"
 	"github.com/krishnaditya65/auth-server/internal/shared/principal"
+	tokenapp "github.com/krishnaditya65/auth-server/internal/token/app"
 )
 
 type AuthenticationMiddleware struct {
@@ -17,6 +19,7 @@ type AuthenticationMiddleware struct {
 	identityRepo       identitydomain.Repository
 	userRoleRepo       authdomain.UserRoleRepository
 	rolePermissionRepo authdomain.RolePermissionRepository
+	jwtService         *tokenapp.JWTService
 }
 
 func NewAuthenticationMiddleware(
@@ -24,78 +27,109 @@ func NewAuthenticationMiddleware(
 	identityRepo identitydomain.Repository,
 	userRoleRepo authdomain.UserRoleRepository,
 	rolePermissionRepo authdomain.RolePermissionRepository,
+	jwtService *tokenapp.JWTService,
 ) *AuthenticationMiddleware {
 	return &AuthenticationMiddleware{
 		sessionRepo:        sessionRepo,
 		identityRepo:       identityRepo,
 		userRoleRepo:       userRoleRepo,
 		rolePermissionRepo: rolePermissionRepo,
+		jwtService:         jwtService,
 	}
 }
 
 func (m *AuthenticationMiddleware) Authenticate(next http.Handler) http.Handler {
-
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-
-		sessionID := r.Header.Get("X-Session-ID")
-
-		if sessionID == "" {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if p := m.fromBearer(r); p != nil {
+			ctx := authctx.WithPrincipal(r.Context(), p)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
-		session, err := m.sessionRepo.GetByID(r.Context(), sessionID)
-		if err != nil {
-			slog.Warn("session lookup failed", "session_id", sessionID, "path", r.URL.Path)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
+		if p := m.fromSessionHeader(r); p != nil {
+			ctx := authctx.WithPrincipal(r.Context(), p)
+			next.ServeHTTP(w, r.WithContext(ctx))
 			return
 		}
 
-		if session.RevokedAt != nil {
-			slog.Warn("rejected revoked session", "session_id", sessionID)
-			http.Error(w, "session revoked", http.StatusUnauthorized)
-			return
-		}
-
-		if time.Now().UTC().After(session.ExpiresAt) {
-			slog.Warn("rejected expired session", "session_id", sessionID)
-			http.Error(w, "session expired", http.StatusUnauthorized)
-			return
-		}
-
-		identity, err := m.identityRepo.GetByID(r.Context(), session.IdentityID)
-		if err != nil {
-			slog.Error("identity lookup failed", "identity_id", session.IdentityID, "err", err)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		roles, err := m.userRoleRepo.GetRolesForUser(r.Context(), session.UserID)
-		if err != nil {
-			slog.Error("role lookup failed", "user_id", session.UserID, "err", err)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		permissions, err := m.rolePermissionRepo.GetPermissionsForUser(r.Context(), session.UserID)
-		if err != nil {
-			slog.Error("permission lookup failed", "user_id", session.UserID, "err", err)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
-		p := &principal.Principal{
-			SessionID:   session.ID,
-			IdentityID:  session.IdentityID,
-			TenantID:    session.TenantID,
-			UserID:      session.UserID,
-			Email:       identity.PrimaryEmail,
-			Roles:       roles,
-			Permissions: permissions,
-		}
-
-		ctx := authctx.WithPrincipal(r.Context(), p)
-
-		next.ServeHTTP(w, r.WithContext(ctx))
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 	})
+}
+
+func (m *AuthenticationMiddleware) fromBearer(r *http.Request) *principal.Principal {
+	authz := r.Header.Get("Authorization")
+	if !strings.HasPrefix(authz, "Bearer ") {
+		return nil
+	}
+	tokenStr := strings.TrimPrefix(authz, "Bearer ")
+	if tokenStr == "" {
+		return nil
+	}
+
+	claims, err := m.jwtService.Verify(r.Context(), tokenStr)
+	if err != nil {
+		slog.Warn("jwt verify failed", "err", err)
+		return nil
+	}
+
+	return &principal.Principal{
+		SessionID:   claims.SessionID,
+		IdentityID:  claims.Subject,
+		TenantID:    claims.TenantID,
+		UserID:      claims.UserID,
+		Email:       claims.Email,
+		Roles:       claims.Roles,
+		Permissions: claims.Permissions,
+	}
+}
+
+func (m *AuthenticationMiddleware) fromSessionHeader(r *http.Request) *principal.Principal {
+	sessionID := r.Header.Get("X-Session-ID")
+	if sessionID == "" {
+		return nil
+	}
+
+	session, err := m.sessionRepo.GetByID(r.Context(), sessionID)
+	if err != nil {
+		slog.Warn("session lookup failed", "session_id", sessionID, "path", r.URL.Path)
+		return nil
+	}
+
+	if session.RevokedAt != nil {
+		slog.Warn("rejected revoked session", "session_id", sessionID)
+		return nil
+	}
+
+	if time.Now().UTC().After(session.ExpiresAt) {
+		slog.Warn("rejected expired session", "session_id", sessionID)
+		return nil
+	}
+
+	identity, err := m.identityRepo.GetByID(r.Context(), session.IdentityID)
+	if err != nil {
+		slog.Error("identity lookup failed", "identity_id", session.IdentityID, "err", err)
+		return nil
+	}
+
+	roles, err := m.userRoleRepo.GetRolesForUser(r.Context(), session.UserID)
+	if err != nil {
+		slog.Error("role lookup failed", "user_id", session.UserID, "err", err)
+		return nil
+	}
+
+	permissions, err := m.rolePermissionRepo.GetPermissionsForUser(r.Context(), session.UserID)
+	if err != nil {
+		slog.Error("permission lookup failed", "user_id", session.UserID, "err", err)
+		return nil
+	}
+
+	return &principal.Principal{
+		SessionID:   session.ID,
+		IdentityID:  session.IdentityID,
+		TenantID:    session.TenantID,
+		UserID:      session.UserID,
+		Email:       identity.PrimaryEmail,
+		Roles:       roles,
+		Permissions: permissions,
+	}
 }

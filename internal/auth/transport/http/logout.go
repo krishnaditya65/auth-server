@@ -25,5 +25,6 @@ func (h *Handler) Logout(
 		return
 	}
 
+	clearRefreshCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }

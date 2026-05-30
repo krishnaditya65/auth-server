@@ -8,11 +8,15 @@ import (
 )
 
 type Config struct {
-	AppEnv      string
-	HTTPPort    string
-	DatabaseURL string
-	RedisAddr   string
-	NATSURL     string
+	AppEnv        string
+	HTTPPort      string
+	DatabaseURL   string
+	RedisAddr     string
+	NATSURL       string
+	JWTIssuer     string
+	WebAuthnRPID  string
+	WebAuthnName  string
+	WebAuthnOrigin string
 }
 
 func Load() Config {
@@ -27,6 +31,10 @@ func Load() Config {
 		DatabaseURL: getEnv("DATABASE_URL", ""),
 		RedisAddr:   getEnv("REDIS_ADDR", "localhost:6380"),
 		NATSURL:     getEnv("NATS_URL", "nats://localhost:4223"),
+		JWTIssuer:      getEnv("JWT_ISSUER", "http://localhost:8080"),
+		WebAuthnRPID:   getEnv("WEBAUTHN_RPID", "localhost"),
+		WebAuthnName:   getEnv("WEBAUTHN_NAME", "Auth Server"),
+		WebAuthnOrigin: getEnv("WEBAUTHN_ORIGIN", "http://localhost:3000"),
 	}
 }
 

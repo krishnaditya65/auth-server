@@ -21,6 +21,33 @@ func writeJSON(w http.ResponseWriter, v any) {
 	json.NewEncoder(w).Encode(v)
 }
 
+const refreshCookieName = "refresh_token"
+const refreshCookieMaxAge = 7 * 24 * 60 * 60
+
+func setRefreshCookie(w http.ResponseWriter, token string) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    token,
+		Path:     "/",
+		MaxAge:   refreshCookieMaxAge,
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
+func clearRefreshCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     refreshCookieName,
+		Value:    "",
+		Path:     "/",
+		MaxAge:   -1,
+		HttpOnly: true,
+		Secure:   false,
+		SameSite: http.SameSiteStrictMode,
+	})
+}
+
 // isValidEmail performs a lightweight structural check: non-empty, contains exactly one @,
 // with non-empty local and domain parts.
 func isValidEmail(email string) bool {

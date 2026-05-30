@@ -30,6 +30,25 @@ import (
 	platformpostgres "github.com/krishnaditya65/auth-server/internal/platform/postgres"
 	pgtx "github.com/krishnaditya65/auth-server/internal/platform/postgres/tx"
 	"github.com/krishnaditya65/auth-server/internal/platform/redis"
+	tokenapp "github.com/krishnaditya65/auth-server/internal/token/app"
+	tokenpostgres "github.com/krishnaditya65/auth-server/internal/token/infra/postgres"
+	tokenhttp "github.com/krishnaditya65/auth-server/internal/token/transport/http"
+
+	oauthapp "github.com/krishnaditya65/auth-server/internal/oauth/app"
+	oauthpostgres "github.com/krishnaditya65/auth-server/internal/oauth/infra/postgres"
+	oauthredis "github.com/krishnaditya65/auth-server/internal/oauth/infra/redis"
+	oauthhttp "github.com/krishnaditya65/auth-server/internal/oauth/transport/http"
+
+	oidcapp "github.com/krishnaditya65/auth-server/internal/oidc/app"
+	oidchttp "github.com/krishnaditya65/auth-server/internal/oidc/transport/http"
+
+	mfaapp "github.com/krishnaditya65/auth-server/internal/mfa/app"
+	mfapostgres "github.com/krishnaditya65/auth-server/internal/mfa/infra/postgres"
+	mfahttp "github.com/krishnaditya65/auth-server/internal/mfa/transport/http"
+
+	waapp "github.com/krishnaditya65/auth-server/internal/webauthn/app"
+	wapostgres "github.com/krishnaditya65/auth-server/internal/webauthn/infra/postgres"
+	wahttp "github.com/krishnaditya65/auth-server/internal/webauthn/transport/http"
 )
 
 func main() {
@@ -75,8 +94,15 @@ func main() {
 	rolePermissionRepo := authorizationpostgres.NewRolePermissionRepository(db)
 	roleRepo := authorizationpostgres.NewRoleRepository(db)
 	userRoleRepo := authorizationpostgres.NewUserRoleRepository(db)
+	signingKeyRepo := tokenpostgres.NewRepository(db)
+	oauthClientRepo := oauthpostgres.NewClientRepository(db)
+	oauthCodeStore := oauthredis.NewCodeStore(cache)
+	mfaRepo := mfapostgres.NewRepository(db)
+	mfaChallengeStore := mfaapp.NewChallengeStore(cache)
 
 	// services
+	jwtService := tokenapp.NewJWTService(signingKeyRepo, cfg.JWTIssuer)
+	totpService := mfaapp.NewTOTPService(mfaRepo, cfg.JWTIssuer)
 	slugService := tenantapp.NewSlugService(tenantRepo)
 	bootstrapService := authorizationapp.NewBootstrapService(roleRepo)
 	permissionBootstrapService := authorizationapp.NewPermissionBootstrapService(
@@ -102,10 +128,30 @@ func main() {
 		credentialRepo,
 		userRepo,
 		userRoleRepo,
+		rolePermissionRepo,
 		sessionRepo,
+		jwtService,
+		mfaRepo,
+		mfaChallengeStore,
 	)
 
-	refreshUseCase := authapp.NewRefreshUseCase(sessionRepo)
+	mfaCompleteUseCase := mfaapp.NewCompleteUseCase(
+		mfaChallengeStore,
+		totpService,
+		sessionRepo,
+		identityRepo,
+		userRoleRepo,
+		rolePermissionRepo,
+		jwtService,
+	)
+
+	refreshUseCase := authapp.NewRefreshUseCase(
+		sessionRepo,
+		identityRepo,
+		userRoleRepo,
+		rolePermissionRepo,
+		jwtService,
+	)
 
 	logoutUseCase := authapp.NewLogoutUseCase(sessionRepo)
 
@@ -159,7 +205,44 @@ func main() {
 		identityRepo,
 		userRoleRepo,
 		rolePermissionRepo,
+		jwtService,
 	)
+
+	jwksHandler := tokenhttp.NewHandler(signingKeyRepo)
+
+	idTokenService := oidcapp.NewIDTokenService(jwtService)
+	oidcHandler := oidchttp.NewHandler(cfg.JWTIssuer)
+	userInfoHandler := oidchttp.NewUserInfoHandler(identityRepo)
+
+	authorizeUseCase := oauthapp.NewAuthorizeUseCase(oauthClientRepo, oauthCodeStore)
+	oauthTokenUseCase := oauthapp.NewTokenUseCase(
+		oauthClientRepo,
+		oauthCodeStore,
+		sessionRepo,
+		identityRepo,
+		userRoleRepo,
+		rolePermissionRepo,
+		jwtService,
+		idTokenService,
+	)
+	oauthHandler := oauthhttp.NewHandler(authorizeUseCase, oauthTokenUseCase)
+
+	mfaHandler := mfahttp.NewHandler(totpService, mfaCompleteUseCase)
+
+	waCredRepo := wapostgres.NewRepository(db)
+	waSessionStore := waapp.NewSessionStore(cache)
+	waService, err := waapp.NewService(
+		cfg.WebAuthnName, cfg.WebAuthnRPID, []string{cfg.WebAuthnOrigin},
+		waCredRepo, identityRepo, waSessionStore,
+	)
+	if err != nil {
+		slog.Error("webauthn init failed", "err", err)
+		os.Exit(1)
+	}
+	waLoginUseCase := waapp.NewLoginUseCase(
+		waService, sessionRepo, identityRepo, userRepo, userRoleRepo, rolePermissionRepo, jwtService,
+	)
+	waHandler := wahttp.NewHandler(waService, waLoginUseCase)
 
 	server := httpserver.New(cfg.HTTPPort)
 	r := server.Router()
@@ -173,6 +256,12 @@ func main() {
 	r.Post("/register", authHandler.Register)
 	r.Post("/login", authHandler.Login)
 	r.Post("/refresh", authHandler.Refresh)
+	r.Get("/.well-known/jwks.json", jwksHandler.JWKS)
+	r.Get("/.well-known/openid-configuration", oidcHandler.Discovery)
+	r.Post("/oauth/token", oauthHandler.Token)
+	r.Post("/mfa/complete", mfaHandler.Complete)
+	r.Post("/webauthn/login/begin", waHandler.LoginBegin)
+	r.Post("/webauthn/login/complete", waHandler.LoginComplete)
 
 	// authenticated routes
 	withAuth := func(next http.Handler) http.Handler {
@@ -184,6 +273,16 @@ func main() {
 
 	r.With(withAuth).Get("/me", authHandler.Me)
 	r.With(withAuth).Post("/logout", authHandler.Logout)
+	r.With(withAuth).Get("/oauth/authorize", oauthHandler.Authorize)
+	r.With(withAuth).Get("/oauth/userinfo", userInfoHandler.UserInfo)
+
+	r.With(withAuth).Post("/mfa/enroll/totp", mfaHandler.EnrollTOTP)
+	r.With(withAuth).Post("/mfa/enroll/verify", mfaHandler.VerifyEnrollment)
+	r.With(withAuth).Get("/mfa/factors", mfaHandler.List)
+
+	r.With(withAuth).Post("/webauthn/register/begin", waHandler.RegisterBegin)
+	r.With(withAuth).Post("/webauthn/register/complete", waHandler.RegisterComplete)
+	r.With(withAuth).Get("/webauthn/credentials", waHandler.List)
 
 	r.With(withAuth, withPerm("users:read")).Get("/users", identityHandler.ListUsers)
 	r.With(withAuth, withPerm("users:read")).Get("/users/{userID}", identityHandler.GetUser)

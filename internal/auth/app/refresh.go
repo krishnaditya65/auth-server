@@ -4,48 +4,59 @@ import (
 	"context"
 	"time"
 
+	authorizationdomain "github.com/krishnaditya65/auth-server/internal/authorization/domain"
+	identitydomain "github.com/krishnaditya65/auth-server/internal/identity/domain"
 	sessiondomain "github.com/krishnaditya65/auth-server/internal/session/domain"
-	"github.com/krishnaditya65/auth-server/internal/shared/id"
-	sharedtoken "github.com/krishnaditya65/auth-server/internal/shared/token"
-
 	sharederrors "github.com/krishnaditya65/auth-server/internal/shared/errors"
+	"github.com/krishnaditya65/auth-server/internal/shared/id"
+	"github.com/krishnaditya65/auth-server/internal/shared/principal"
+	sharedtoken "github.com/krishnaditya65/auth-server/internal/shared/token"
+	tokenapp "github.com/krishnaditya65/auth-server/internal/token/app"
 )
 
 type RefreshInput struct {
 	RefreshToken string
 }
+
 type RefreshOutput struct {
-	SessionID string
-
-	TenantID string
-	UserID   string
-
+	SessionID    string
+	TenantID     string
+	UserID       string
+	Roles        []string
+	Permissions  []string
+	AccessToken  string
+	ExpiresIn    int
 	RefreshToken string
 }
+
 type RefreshUseCase struct {
-	sessionRepo sessiondomain.Repository
+	sessionRepo        sessiondomain.Repository
+	identityRepo       identitydomain.Repository
+	userRoleRepo       authorizationdomain.UserRoleRepository
+	rolePermissionRepo authorizationdomain.RolePermissionRepository
+	jwtService         *tokenapp.JWTService
 }
 
 func NewRefreshUseCase(
 	sessionRepo sessiondomain.Repository,
+	identityRepo identitydomain.Repository,
+	userRoleRepo authorizationdomain.UserRoleRepository,
+	rolePermissionRepo authorizationdomain.RolePermissionRepository,
+	jwtService *tokenapp.JWTService,
 ) *RefreshUseCase {
 	return &RefreshUseCase{
-		sessionRepo: sessionRepo,
+		sessionRepo:        sessionRepo,
+		identityRepo:       identityRepo,
+		userRoleRepo:       userRoleRepo,
+		rolePermissionRepo: rolePermissionRepo,
+		jwtService:         jwtService,
 	}
 }
 
-func (u *RefreshUseCase) Execute(
-	ctx context.Context,
-	input RefreshInput,
-) (*RefreshOutput, error) {
-
+func (u *RefreshUseCase) Execute(ctx context.Context, input RefreshInput) (*RefreshOutput, error) {
 	refreshHash := sharedtoken.Hash(input.RefreshToken)
 
-	session, err := u.sessionRepo.GetByRefreshTokenHash(
-		ctx,
-		refreshHash,
-	)
-
+	session, err := u.sessionRepo.GetByRefreshTokenHash(ctx, refreshHash)
 	if err != nil {
 		return nil, sharederrors.ErrUnauthorized
 	}
@@ -58,54 +69,62 @@ func (u *RefreshUseCase) Execute(
 		return nil, sharederrors.ErrUnauthorized
 	}
 
-	err = u.sessionRepo.Revoke(
-		ctx,
-		session.ID,
-	)
-
-	if err != nil {
+	if err := u.sessionRepo.Revoke(ctx, session.ID); err != nil {
 		return nil, err
 	}
 
 	newRefreshToken, err := sharedtoken.GenerateRandom(32)
+	if err != nil {
+		return nil, err
+	}
+	newRefreshHash := sharedtoken.Hash(newRefreshToken)
 
+	now := time.Now().UTC()
+	parentID := session.ID
+
+	newSession := &sessiondomain.Session{
+		ID:               id.New(),
+		TenantID:         session.TenantID,
+		IdentityID:       session.IdentityID,
+		UserID:           session.UserID,
+		RefreshTokenHash: newRefreshHash,
+		ParentSessionID:  &parentID,
+		IPAddress:        session.IPAddress,
+		UserAgent:        session.UserAgent,
+		ExpiresAt:        now.Add(refreshTokenTTL),
+		CreatedAt:        now,
+	}
+
+	if err := u.sessionRepo.Create(ctx, newSession); err != nil {
+		return nil, err
+	}
+
+	identity, err := u.identityRepo.GetByID(ctx, session.IdentityID)
 	if err != nil {
 		return nil, err
 	}
 
-	newRefreshHash := sharedtoken.Hash(newRefreshToken)
-
-	now := time.Now().UTC()
-
-	parentID := session.ID
-
-	newSession := &sessiondomain.Session{
-		ID: id.New(),
-
-		TenantID: session.TenantID,
-
-		IdentityID: session.IdentityID,
-
-		UserID: session.UserID,
-
-		RefreshTokenHash: newRefreshHash,
-
-		ParentSessionID: &parentID,
-
-		IPAddress: session.IPAddress,
-
-		UserAgent: session.UserAgent,
-
-		ExpiresAt: now.Add(24 * time.Hour),
-
-		CreatedAt: now,
+	roles, err := u.userRoleRepo.GetRolesForUser(ctx, session.UserID)
+	if err != nil {
+		return nil, err
 	}
 
-	err = u.sessionRepo.Create(
-		ctx,
-		newSession,
-	)
+	permissions, err := u.rolePermissionRepo.GetPermissionsForUser(ctx, session.UserID)
+	if err != nil {
+		return nil, err
+	}
 
+	p := &principal.Principal{
+		SessionID:   newSession.ID,
+		IdentityID:  session.IdentityID,
+		TenantID:    session.TenantID,
+		UserID:      session.UserID,
+		Email:       identity.PrimaryEmail,
+		Roles:       roles,
+		Permissions: permissions,
+	}
+
+	accessToken, err := u.jwtService.Issue(ctx, p, tokenapp.IssueOptions{TTL: accessTokenTTL})
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +133,10 @@ func (u *RefreshUseCase) Execute(
 		SessionID:    newSession.ID,
 		TenantID:     newSession.TenantID,
 		UserID:       newSession.UserID,
+		Roles:        roles,
+		Permissions:  permissions,
+		AccessToken:  accessToken,
+		ExpiresIn:    int(accessTokenTTL.Seconds()),
 		RefreshToken: newRefreshToken,
 	}, nil
 }

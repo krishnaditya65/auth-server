@@ -51,6 +51,7 @@ func (h *Handler) Login(
 		return
 	}
 
+	setRefreshCookie(w, result.RefreshToken)
 	writeJSON(w, result)
 }
 

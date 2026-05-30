@@ -17,4 +17,8 @@ type PermissionRepository interface {
 		ctx context.Context,
 		name string,
 	) (*Permission, error)
+
+	List(
+		ctx context.Context,
+	) ([]*Permission, error)
 }

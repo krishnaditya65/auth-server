@@ -195,6 +195,116 @@ func (r *Repository) GetByIdentityID(
 	return &user, nil
 }
 
+func (r *Repository) GetByTenantAndID(
+	ctx context.Context,
+	tenantID string,
+	userID string,
+) (*identitydomain.User, error) {
+
+	query := `
+		SELECT
+			id,
+			tenant_id,
+			identity_id,
+			username,
+			display_name,
+			status,
+			created_at,
+			updated_at
+		FROM users
+		WHERE tenant_id = $1
+		  AND id = $2
+	`
+
+	row := r.executor(ctx).QueryRow(
+		ctx,
+		query,
+		tenantID,
+		userID,
+	)
+
+	var user identitydomain.User
+
+	err := row.Scan(
+		&user.ID,
+		&user.TenantID,
+		&user.IdentityID,
+		&user.Username,
+		&user.DisplayName,
+		&user.Status,
+		&user.CreatedAt,
+		&user.UpdatedAt,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return &user, nil
+}
+
+func (r *Repository) ListByTenant(
+	ctx context.Context,
+	tenantID string,
+) ([]*identitydomain.User, error) {
+
+	query := `
+		SELECT
+			id,
+			tenant_id,
+			identity_id,
+			username,
+			display_name,
+			status,
+			created_at,
+			updated_at
+		FROM users
+		WHERE tenant_id = $1
+		ORDER BY created_at
+	`
+
+	rows, err := r.executor(ctx).Query(
+		ctx,
+		query,
+		tenantID,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var users []*identitydomain.User
+
+	for rows.Next() {
+
+		var user identitydomain.User
+
+		err := rows.Scan(
+			&user.ID,
+			&user.TenantID,
+			&user.IdentityID,
+			&user.Username,
+			&user.DisplayName,
+			&user.Status,
+			&user.CreatedAt,
+			&user.UpdatedAt,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		users = append(
+			users,
+			&user,
+		)
+	}
+
+	return users, nil
+}
+
 type executor interface {
 	Exec(
 		ctx context.Context,
@@ -207,6 +317,12 @@ type executor interface {
 		sql string,
 		args ...any,
 	) pgx.Row
+
+	Query(
+		ctx context.Context,
+		sql string,
+		args ...any,
+	) (pgx.Rows, error)
 }
 
 func (r *Repository) executor(ctx context.Context) executor {

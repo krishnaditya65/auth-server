@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	authdomain "github.com/krishnaditya65/auth-server/internal/auth/domain"
@@ -111,15 +112,18 @@ func (u *LoginUseCase) Execute(
 		return nil, err
 	}
 
-	refreshHash, err := password.Hash(
-		refreshToken,
-	)
-	if err != nil {
-		return nil, err
-	}
+	refreshHash :=
+		sharedtoken.Hash(
+			refreshToken,
+		)
 
 	now := time.Now().UTC()
 	ip := "127.0.0.1"
+
+	fmt.Println(
+		"LOGIN HASH:",
+		refreshHash,
+	)
 
 	session := &sessiondomain.Session{
 		ID: id.New(),

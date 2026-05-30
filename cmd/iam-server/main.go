@@ -10,6 +10,8 @@ import (
 	authhttp "github.com/krishnaditya65/auth-server/internal/auth/transport/http"
 	authorizationapp "github.com/krishnaditya65/auth-server/internal/authorization/app"
 	authorizationpostgres "github.com/krishnaditya65/auth-server/internal/authorization/infra/postgres"
+	authorizationmiddleware "github.com/krishnaditya65/auth-server/internal/authorization/middleware"
+	authorizationhttp "github.com/krishnaditya65/auth-server/internal/authorization/transport/http"
 
 	identitypostgres "github.com/krishnaditya65/auth-server/internal/identity/infra/postgres"
 	tenantapp "github.com/krishnaditya65/auth-server/internal/tenant/app"
@@ -17,6 +19,9 @@ import (
 
 	postgresuser "github.com/krishnaditya65/auth-server/internal/identity/infra/postgresuser"
 	sessionpostgres "github.com/krishnaditya65/auth-server/internal/session/infra/postgres"
+
+	identityapp "github.com/krishnaditya65/auth-server/internal/identity/app"
+	identityhttp "github.com/krishnaditya65/auth-server/internal/identity/transport/http"
 
 	"github.com/krishnaditya65/auth-server/internal/platform/config"
 	"github.com/krishnaditya65/auth-server/internal/platform/httpserver"
@@ -112,11 +117,73 @@ func main() {
 		sessionRepo,
 	)
 
-	// handlers
+	identityGetUserUseCase :=
+		identityapp.NewGetUserUseCase(
+			userRepo,
+		)
+
+	listUsersUseCase :=
+		identityapp.NewListUsersUseCase(
+			userRepo,
+		)
+
+	createUserUseCase :=
+		identityapp.NewCreateUserUseCase(
+			txManager,
+			identityRepo,
+			credentialRepo,
+			userRepo,
+			roleRepo,
+			userRoleRepo,
+		)
+
+	createRoleUseCase :=
+		authorizationapp.NewCreateRoleUseCase(
+			roleRepo,
+		)
+
+	listRolesUseCase :=
+		authorizationapp.NewListRolesUseCase(
+			roleRepo,
+		)
+
+	assignPermissionUseCase :=
+		authorizationapp.NewAssignPermissionToRoleUseCase(
+			roleRepo,
+			permissionRepo,
+			rolePermissionRepo,
+		)
+
+	listRolePermissionsUseCase :=
+		authorizationapp.NewListRolePermissionsUseCase(
+			roleRepo,
+			rolePermissionRepo,
+		)
+	refreshUseCase :=
+		authapp.NewRefreshUseCase(
+			sessionRepo,
+		)
+
+		// handlers
 	authHandler := authhttp.NewHandler(
 		registerUseCase,
 		loginUseCase,
+		refreshUseCase,
 	)
+
+	identityHandler :=
+		identityhttp.NewHandler(
+			identityGetUserUseCase,
+			listUsersUseCase,
+			createUserUseCase,
+		)
+	authorizationHandler :=
+		authorizationhttp.NewHandler(
+			createRoleUseCase,
+			listRolesUseCase,
+			assignPermissionUseCase,
+			listRolePermissionsUseCase,
+		)
 
 	// middleware
 	authMiddleware := authmiddleware.NewAuthenticationMiddleware(
@@ -125,42 +192,161 @@ func main() {
 		userRoleRepo,
 		rolePermissionRepo,
 	)
+
 	server := httpserver.New(cfg.HTTPPort)
+	r := server.Router()
 
-	server.Handle(
-		"GET",
+	r.Get(
 		"/health",
-		http.HandlerFunc(
-			func(w http.ResponseWriter, r *http.Request) {
-				w.Write([]byte("ok"))
-			},
-		),
+		func(
+			w http.ResponseWriter,
+			r *http.Request,
+		) {
+			w.Write([]byte("ok"))
+		},
 	)
 
-	server.Handle(
-		"POST",
+	r.Post(
 		"/register",
-		http.HandlerFunc(
-			authHandler.Register,
-		),
+		authHandler.Register,
 	)
 
-	server.Handle(
-		"POST",
+	r.Post(
 		"/login",
-		http.HandlerFunc(
-			authHandler.Login,
-		),
+		authHandler.Login,
 	)
 
-	server.Handle(
-		"GET",
+	r.With(
+		func(next http.Handler) http.Handler {
+			return authMiddleware.Authenticate(
+				next,
+			)
+		},
+	).Get(
 		"/me",
-		authMiddleware.Authenticate(
-			http.HandlerFunc(
-				authHandler.Me,
-			),
-		),
+		authHandler.Me,
+	)
+
+	r.With(
+		func(next http.Handler) http.Handler {
+			return authMiddleware.Authenticate(
+				next,
+			)
+		},
+		func(next http.Handler) http.Handler {
+			return authorizationmiddleware.
+				RequirePermission(
+					"users:read",
+				)(
+				next,
+			)
+		},
+	).Get(
+		"/users/{userID}",
+		identityHandler.GetUser,
+	)
+
+	r.With(
+		func(next http.Handler) http.Handler {
+			return authMiddleware.Authenticate(
+				next,
+			)
+		},
+		func(next http.Handler) http.Handler {
+			return authorizationmiddleware.
+				RequirePermission(
+					"users:read",
+				)(
+				next,
+			)
+		},
+	).Get(
+		"/users",
+		identityHandler.ListUsers,
+	)
+
+	r.With(
+		func(next http.Handler) http.Handler {
+			return authMiddleware.Authenticate(
+				next,
+			)
+		},
+		func(next http.Handler) http.Handler {
+			return authorizationmiddleware.
+				RequirePermission(
+					"users:create",
+				)(
+				next,
+			)
+		},
+	).Post(
+		"/users",
+		identityHandler.CreateUser,
+	)
+
+	r.With(
+		func(next http.Handler) http.Handler {
+			return authMiddleware.Authenticate(next)
+		},
+		func(next http.Handler) http.Handler {
+			return authorizationmiddleware.
+				RequirePermission(
+					"roles:create",
+				)(next)
+		},
+	).Post(
+		"/roles",
+		authorizationHandler.CreateRole,
+	)
+
+	r.With(
+		func(next http.Handler) http.Handler {
+			return authMiddleware.Authenticate(next)
+		},
+		func(next http.Handler) http.Handler {
+			return authorizationmiddleware.
+				RequirePermission(
+					"roles:read",
+				)(next)
+		},
+	).Get(
+		"/roles",
+		authorizationHandler.ListRoles,
+	)
+
+	r.With(
+		func(next http.Handler) http.Handler {
+			return authMiddleware.Authenticate(next)
+		},
+		func(next http.Handler) http.Handler {
+			return authorizationmiddleware.
+				RequirePermission(
+					"roles:update",
+				)(next)
+		},
+	).Post(
+		"/roles/{roleID}/permissions",
+		authorizationHandler.AssignPermission,
+	)
+
+	r.With(
+		func(next http.Handler) http.Handler {
+			return authMiddleware.Authenticate(next)
+		},
+		func(next http.Handler) http.Handler {
+			return authorizationmiddleware.
+				RequirePermission(
+					"roles:read",
+				)(next)
+		},
+	).Get(
+		"/roles/{roleID}/permissions",
+		authorizationHandler.ListRolePermissions,
+	)
+
+	r.Post(
+		"/refresh",
+		authHandler.Refresh,
 	)
 
 	log.Printf("starting auth server on port %s", cfg.HTTPPort)

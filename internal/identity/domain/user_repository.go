@@ -23,4 +23,15 @@ type UserRepository interface {
 		ctx context.Context,
 		identityID string,
 	) (*User, error)
+
+	GetByTenantAndID(
+		ctx context.Context,
+		tenantID string,
+		userID string,
+	) (*User, error)
+
+	ListByTenant(
+		ctx context.Context,
+		tenantID string,
+	) ([]*User, error)
 }

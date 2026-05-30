@@ -2,7 +2,9 @@ package token
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 )
 
 func GenerateRandom(
@@ -19,4 +21,17 @@ func GenerateRandom(
 	return base64.RawURLEncoding.EncodeToString(
 		bytes,
 	), nil
+}
+
+func Hash(
+	token string,
+) string {
+
+	sum := sha256.Sum256(
+		[]byte(token),
+	)
+
+	return hex.EncodeToString(
+		sum[:],
+	)
 }

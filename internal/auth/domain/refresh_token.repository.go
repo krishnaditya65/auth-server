@@ -2,21 +2,17 @@ package domain
 
 import "context"
 
-type Repository interface {
+type RefreshTokenRepository interface {
 	Create(
 		ctx context.Context,
-		session *Session,
+		token *RefreshToken,
 	) error
 
-	GetByID(
-		ctx context.Context,
-		id string,
-	) (*Session, error)
-
-	GetByRefreshTokenHash(
+	GetByHash(
 		ctx context.Context,
 		hash string,
-	) (*Session, error)
+	) (*RefreshToken, error)
+
 	Revoke(
 		ctx context.Context,
 		id string,

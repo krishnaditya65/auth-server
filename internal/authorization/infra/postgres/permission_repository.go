@@ -123,6 +123,57 @@ func (r *PermissionRepository) GetByName(
 	return &permission, nil
 }
 
+func (r *PermissionRepository) List(
+	ctx context.Context,
+) ([]*authdomain.Permission, error) {
+
+	query := `
+		SELECT
+			id,
+			name,
+			description,
+			created_at
+		FROM permissions
+		ORDER BY name
+	`
+
+	rows, err := r.executor(ctx).Query(
+		ctx,
+		query,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var permissions []*authdomain.Permission
+
+	for rows.Next() {
+
+		var permission authdomain.Permission
+
+		err := rows.Scan(
+			&permission.ID,
+			&permission.Name,
+			&permission.Description,
+			&permission.CreatedAt,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		permissions = append(
+			permissions,
+			&permission,
+		)
+	}
+
+	return permissions, nil
+}
+
 type permissionExecutor interface {
 	Exec(
 		ctx context.Context,
@@ -135,6 +186,12 @@ type permissionExecutor interface {
 		sql string,
 		args ...any,
 	) pgx.Row
+
+	Query(
+		ctx context.Context,
+		sql string,
+		args ...any,
+	) (pgx.Rows, error)
 }
 
 func (r *PermissionRepository) executor(

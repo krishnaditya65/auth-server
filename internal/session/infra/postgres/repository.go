@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"fmt"
 
 	sessiondomain "github.com/krishnaditya65/auth-server/internal/session/domain"
 
@@ -155,7 +156,7 @@ func (r *Repository) GetByRefreshTokenHash(
 			user_id,
 			refresh_token_hash,
 			parent_session_id,
-			ip_address,
+			ip_address::text,
 			user_agent,
 			expires_at,
 			revoked_at,
@@ -187,8 +188,32 @@ func (r *Repository) GetByRefreshTokenHash(
 	)
 
 	if err != nil {
+		fmt.Println(
+			"GET BY REFRESH HASH ERROR:",
+			err,
+		)
 		return nil, err
 	}
 
 	return &session, nil
+}
+
+func (r *Repository) Revoke(
+	ctx context.Context,
+	id string,
+) error {
+
+	query := `
+		UPDATE sessions
+		SET revoked_at = NOW()
+		WHERE id = $1
+	`
+
+	_, err := r.executor(ctx).Exec(
+		ctx,
+		query,
+		id,
+	)
+
+	return err
 }

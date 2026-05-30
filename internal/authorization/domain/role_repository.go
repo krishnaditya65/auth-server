@@ -18,4 +18,8 @@ type RoleRepository interface {
 		tenantID string,
 		name string,
 	) (*Role, error)
+	ListByTenant(
+		ctx context.Context,
+		tenantID string,
+	) ([]*Role, error)
 }

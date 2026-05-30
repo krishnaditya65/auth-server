@@ -11,16 +11,19 @@ import (
 type Handler struct {
 	registerUseCase *authapp.RegisterUseCase
 	loginUseCase    *authapp.LoginUseCase
+	refreshUseCase  *authapp.RefreshUseCase
 }
 
 func NewHandler(
 	registerUseCase *authapp.RegisterUseCase,
 	loginUseCase *authapp.LoginUseCase,
+	refreshUseCase *authapp.RefreshUseCase,
 ) *Handler {
 
 	return &Handler{
 		registerUseCase: registerUseCase,
 		loginUseCase:    loginUseCase,
+		refreshUseCase:  refreshUseCase,
 	}
 }
 

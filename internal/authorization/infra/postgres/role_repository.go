@@ -62,8 +62,7 @@ func (r *RoleRepository) GetByID(
 			tenant_id,
 			name,
 			description,
-			created_at,
-			updated_at
+			created_at 
 		FROM roles
 		WHERE id = $1
 	`
@@ -103,7 +102,7 @@ func (r *RoleRepository) GetByTenantAndName(
 			tenant_id,
 			name,
 			description,
-			created_at,
+			created_at
 		FROM roles
 		WHERE tenant_id = $1
 		  AND name = $2
@@ -133,6 +132,62 @@ func (r *RoleRepository) GetByTenantAndName(
 	return &role, nil
 }
 
+func (r *RoleRepository) ListByTenant(
+	ctx context.Context,
+	tenantID string,
+) ([]*authdomain.Role, error) {
+
+	query := `
+		SELECT
+			id,
+			tenant_id,
+			name,
+			description,
+			created_at
+		FROM roles
+		WHERE tenant_id = $1
+		ORDER BY name
+	`
+
+	rows, err := r.executor(ctx).Query(
+		ctx,
+		query,
+		tenantID,
+	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	defer rows.Close()
+
+	var roles []*authdomain.Role
+
+	for rows.Next() {
+
+		var role authdomain.Role
+
+		err := rows.Scan(
+			&role.ID,
+			&role.TenantID,
+			&role.Name,
+			&role.Description,
+			&role.CreatedAt,
+		)
+
+		if err != nil {
+			return nil, err
+		}
+
+		roles = append(
+			roles,
+			&role,
+		)
+	}
+
+	return roles, nil
+}
+
 type roleExecutor interface {
 	Exec(
 		ctx context.Context,
@@ -145,6 +200,11 @@ type roleExecutor interface {
 		sql string,
 		args ...any,
 	) pgx.Row
+	Query(
+		ctx context.Context,
+		sql string,
+		args ...any,
+	) (pgx.Rows, error)
 }
 
 func (r *RoleRepository) executor(

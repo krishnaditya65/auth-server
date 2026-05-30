@@ -5,7 +5,6 @@ import (
 	"net/http"
 
 	authorizationapp "github.com/krishnaditya65/auth-server/internal/authorization/app"
-
 	authctx "github.com/krishnaditya65/auth-server/internal/shared/context"
 	sharederrors "github.com/krishnaditya65/auth-server/internal/shared/errors"
 )
@@ -15,28 +14,20 @@ func (h *Handler) CreateRole(
 	r *http.Request,
 ) {
 
-	var req CreateRoleRequest
-
-	err := json.NewDecoder(
-		r.Body,
-	).Decode(
-		&req,
-	)
-
-	if err != nil {
-		http.Error(
-			w,
-			"invalid request",
-			http.StatusBadRequest,
-		)
+	p, ok := authctx.Principal(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	p := authctx.MustPrincipal(
-		r.Context(),
-	)
+	var req CreateRoleRequest
 
-	err = h.createRoleUseCase.Execute(
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	err := h.createRoleUseCase.Execute(
 		r.Context(),
 		authorizationapp.CreateRoleInput{
 			TenantID:    p.TenantID,
@@ -46,25 +37,13 @@ func (h *Handler) CreateRole(
 	)
 
 	if err != nil {
-
 		if err == sharederrors.ErrConflict {
-			http.Error(
-				w,
-				"role already exists",
-				http.StatusConflict,
-			)
+			http.Error(w, "role already exists", http.StatusConflict)
 			return
 		}
-
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusInternalServerError,
-		)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(
-		http.StatusCreated,
-	)
+	w.WriteHeader(http.StatusCreated)
 }

@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	identityapp "github.com/krishnaditya65/auth-server/internal/identity/app"
-
 	authctx "github.com/krishnaditya65/auth-server/internal/shared/context"
+	sharederrors "github.com/krishnaditya65/auth-server/internal/shared/errors"
 )
 
 type CreateUserRequest struct {
@@ -21,28 +21,20 @@ func (h *Handler) CreateUser(
 	r *http.Request,
 ) {
 
-	var req CreateUserRequest
-
-	err := json.NewDecoder(
-		r.Body,
-	).Decode(
-		&req,
-	)
-
-	if err != nil {
-		http.Error(
-			w,
-			"invalid request",
-			http.StatusBadRequest,
-		)
+	p, ok := authctx.Principal(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	p := authctx.MustPrincipal(
-		r.Context(),
-	)
+	var req CreateUserRequest
 
-	err = h.createUserUseCase.Execute(
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	user, err := h.createUserUseCase.Execute(
 		r.Context(),
 		identityapp.CreateUserInput{
 			TenantID:    p.TenantID,
@@ -54,15 +46,15 @@ func (h *Handler) CreateUser(
 	)
 
 	if err != nil {
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusBadRequest,
-		)
+		if err == sharederrors.ErrConflict {
+			http.Error(w, "email already exists", http.StatusConflict)
+			return
+		}
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(
-		http.StatusCreated,
-	)
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(user)
 }

@@ -12,30 +12,19 @@ func (h *Handler) ListUsers(
 	r *http.Request,
 ) {
 
-	p := authctx.MustPrincipal(
-		r.Context(),
-	)
-
-	users, err := h.listUsersUseCase.Execute(
-		r.Context(),
-		p.TenantID,
-	)
-
-	if err != nil {
-		http.Error(
-			w,
-			"failed to list users",
-			http.StatusInternalServerError,
-		)
+	p, ok := authctx.Principal(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	w.Header().Set(
-		"Content-Type",
-		"application/json",
-	)
+	users, err := h.listUsersUseCase.Execute(r.Context(), p.TenantID)
 
-	_ = json.NewEncoder(w).Encode(
-		users,
-	)
+	if err != nil {
+		http.Error(w, "failed to list users", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(users)
 }

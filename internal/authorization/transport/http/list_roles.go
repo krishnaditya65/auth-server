@@ -12,30 +12,19 @@ func (h *Handler) ListRoles(
 	r *http.Request,
 ) {
 
-	p := authctx.MustPrincipal(
-		r.Context(),
-	)
-
-	roles, err := h.listRolesUseCase.Execute(
-		r.Context(),
-		p.TenantID,
-	)
-
-	if err != nil {
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusInternalServerError,
-		)
+	p, ok := authctx.Principal(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	w.Header().Set(
-		"Content-Type",
-		"application/json",
-	)
+	roles, err := h.listRolesUseCase.Execute(r.Context(), p.TenantID)
 
-	_ = json.NewEncoder(w).Encode(
-		roles,
-	)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(roles)
 }

@@ -7,7 +7,6 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	authorizationapp "github.com/krishnaditya65/auth-server/internal/authorization/app"
-
 	authctx "github.com/krishnaditya65/auth-server/internal/shared/context"
 )
 
@@ -16,33 +15,22 @@ func (h *Handler) AssignPermission(
 	r *http.Request,
 ) {
 
-	roleID := chi.URLParam(
-		r,
-		"roleID",
-	)
-
-	var req AssignPermissionRequest
-
-	err := json.NewDecoder(
-		r.Body,
-	).Decode(
-		&req,
-	)
-
-	if err != nil {
-		http.Error(
-			w,
-			"invalid request",
-			http.StatusBadRequest,
-		)
+	p, ok := authctx.Principal(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	p := authctx.MustPrincipal(
-		r.Context(),
-	)
+	roleID := chi.URLParam(r, "roleID")
 
-	err = h.assignPermissionUseCase.Execute(
+	var req AssignPermissionRequest
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	err := h.assignPermissionUseCase.Execute(
 		r.Context(),
 		authorizationapp.AssignPermissionToRoleInput{
 			TenantID:       p.TenantID,
@@ -52,15 +40,9 @@ func (h *Handler) AssignPermission(
 	)
 
 	if err != nil {
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusBadRequest,
-		)
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
-	w.WriteHeader(
-		http.StatusNoContent,
-	)
+	w.WriteHeader(http.StatusNoContent)
 }

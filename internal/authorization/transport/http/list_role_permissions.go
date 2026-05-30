@@ -14,39 +14,25 @@ func (h *Handler) ListRolePermissions(
 	r *http.Request,
 ) {
 
-	roleID := chi.URLParam(
-		r,
-		"roleID",
-	)
-
-	p := authctx.MustPrincipal(
-		r.Context(),
-	)
-
-	permissions, err :=
-		h.listRolePermissionsUseCase.Execute(
-			r.Context(),
-			p.TenantID,
-			roleID,
-		)
-
-	if err != nil {
-		http.Error(
-			w,
-			err.Error(),
-			http.StatusBadRequest,
-		)
+	p, ok := authctx.Principal(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
 
-	w.Header().Set(
-		"Content-Type",
-		"application/json",
+	roleID := chi.URLParam(r, "roleID")
+
+	permissions, err := h.listRolePermissionsUseCase.Execute(
+		r.Context(),
+		p.TenantID,
+		roleID,
 	)
 
-	_ = json.NewEncoder(
-		w,
-	).Encode(
-		permissions,
-	)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(permissions)
 }

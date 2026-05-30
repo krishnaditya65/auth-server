@@ -6,9 +6,8 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	authctx "github.com/krishnaditya65/auth-server/internal/shared/context"
-
 	identityapp "github.com/krishnaditya65/auth-server/internal/identity/app"
+	authctx "github.com/krishnaditya65/auth-server/internal/shared/context"
 )
 
 func (h *Handler) GetUser(
@@ -16,14 +15,13 @@ func (h *Handler) GetUser(
 	r *http.Request,
 ) {
 
-	userID := chi.URLParam(
-		r,
-		"userID",
-	)
+	p, ok := authctx.Principal(r.Context())
+	if !ok {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
 
-	p := authctx.MustPrincipal(
-		r.Context(),
-	)
+	userID := chi.URLParam(r, "userID")
 
 	user, err := h.getUserUseCase.Execute(
 		r.Context(),
@@ -34,20 +32,10 @@ func (h *Handler) GetUser(
 	)
 
 	if err != nil {
-		http.Error(
-			w,
-			"user not found",
-			http.StatusNotFound,
-		)
+		http.Error(w, "user not found", http.StatusNotFound)
 		return
 	}
 
-	w.Header().Set(
-		"Content-Type",
-		"application/json",
-	)
-
-	_ = json.NewEncoder(w).Encode(
-		user,
-	)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(user)
 }

@@ -57,9 +57,11 @@ func NewCreateUserUseCase(
 func (u *CreateUserUseCase) Execute(
 	ctx context.Context,
 	input CreateUserInput,
-) error {
+) (*identitydomain.User, error) {
 
-	return u.txManager.WithinTransaction(
+	var created *identitydomain.User
+
+	err := u.txManager.WithinTransaction(
 		ctx,
 		func(txCtx context.Context) error {
 
@@ -74,19 +76,11 @@ func (u *CreateUserUseCase) Execute(
 				UpdatedAt:     now,
 			}
 
-			err := u.identityRepo.Create(
-				txCtx,
-				identity,
-			)
-
-			if err != nil {
+			if err := u.identityRepo.Create(txCtx, identity); err != nil {
 				return err
 			}
 
-			hash, err := password.Hash(
-				input.Password,
-			)
-
+			hash, err := password.Hash(input.Password)
 			if err != nil {
 				return err
 			}
@@ -100,12 +94,7 @@ func (u *CreateUserUseCase) Execute(
 				UpdatedAt:      now,
 			}
 
-			err = u.credentialRepo.Create(
-				txCtx,
-				credential,
-			)
-
-			if err != nil {
+			if err := u.credentialRepo.Create(txCtx, credential); err != nil {
 				return err
 			}
 
@@ -120,39 +109,31 @@ func (u *CreateUserUseCase) Execute(
 				UpdatedAt:   now,
 			}
 
-			err = u.userRepo.Create(
-				txCtx,
-				user,
-			)
+			if err := u.userRepo.Create(txCtx, user); err != nil {
+				return err
+			}
 
+			role, err := u.roleRepo.GetByTenantAndName(txCtx, input.TenantID, input.RoleName)
 			if err != nil {
 				return err
 			}
 
-			role, err := u.roleRepo.GetByTenantAndName(
-				txCtx,
-				input.TenantID,
-				input.RoleName,
-			)
-
-			if err != nil {
+			if err := u.userRoleRepo.AssignRole(txCtx, &authorizationdomain.UserRole{
+				UserID:    user.ID,
+				RoleID:    role.ID,
+				CreatedAt: now,
+			}); err != nil {
 				return err
 			}
 
-			err = u.userRoleRepo.AssignRole(
-				txCtx,
-				&authorizationdomain.UserRole{
-					UserID:    user.ID,
-					RoleID:    role.ID,
-					CreatedAt: now,
-				},
-			)
-
-			if err != nil {
-				return err
-			}
-
+			created = user
 			return nil
 		},
 	)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return created, nil
 }
